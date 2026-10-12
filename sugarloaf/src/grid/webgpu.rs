@@ -16,7 +16,6 @@ use super::cell::{CellBg, CellText, GridUniforms};
 use crate::context::webgpu::WgpuContext;
 use crate::renderer::image_cache::atlas::AtlasAllocator;
 
-const FRAMES_IN_FLIGHT: usize = 3;
 const CURSOR_ROW_SLOTS: usize = 2;
 const ATLAS_SIZE: u32 = 2048;
 
@@ -189,15 +188,15 @@ pub struct WgpuGridRenderer {
     cols: u32,
     rows: u32,
 
-    bg_cpu: [Vec<CellBg>; FRAMES_IN_FLIGHT],
-    bg_buffers: [wgpu::Buffer; FRAMES_IN_FLIGHT],
+    bg_cpu: Vec<CellBg>,
+    bg_buffer: wgpu::Buffer,
 
     fg_rows: Vec<Vec<CellText>>,
-    fg_buffers: [wgpu::Buffer; FRAMES_IN_FLIGHT],
-    fg_capacity: [usize; FRAMES_IN_FLIGHT],
+    fg_buffer: wgpu::Buffer,
+    fg_capacity: usize,
     fg_staging: Vec<CellText>,
 
-    /// GPU-resident instance count in `fg_buffers[0]` from the last
+    /// GPU-resident instance count in `fg_buffer` from the last
     /// flush. Reused on Noop/CursorOnly frames to skip the concat
     /// and `write_buffer` call. Same pattern as `MetalGridRenderer`.
     fg_live_count: u32,
@@ -205,9 +204,6 @@ pub struct WgpuGridRenderer {
     fg_dirty: bool,
     /// `bg_cpu` changed since the last `write_buffer`.
     bg_dirty: bool,
-
-    #[allow(dead_code)]
-    frame: usize,
 
     uniform_buffer: wgpu::Buffer,
 
@@ -242,12 +238,13 @@ impl WgpuGridRenderer {
         let queue = ctx.queue.clone();
 
         let bg_len = (cols as usize) * (rows as usize);
-        let bg_cpu = std::array::from_fn(|_| vec![CellBg::TRANSPARENT; bg_len]);
-        let bg_buffers = std::array::from_fn(|_| alloc_bg_buffer(&device, cols, rows));
+        // Queue writes and draws already use a single persistent buffer. wgpu
+        // orders uploads before submission, so spare frame slots are unnecessary.
+        let bg_cpu = vec![CellBg::TRANSPARENT; bg_len];
+        let bg_buffer = alloc_bg_buffer(&device, cols, rows);
 
         let initial_fg_capacity = bg_len.max(1);
-        let fg_buffers =
-            std::array::from_fn(|_| alloc_fg_buffer(&device, initial_fg_capacity));
+        let fg_buffer = alloc_fg_buffer(&device, initial_fg_capacity);
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("grid.uniforms"),
@@ -262,7 +259,7 @@ impl WgpuGridRenderer {
             &device,
             &bg_bind_group_layout,
             &uniform_buffer,
-            &bg_buffers[0],
+            &bg_buffer,
         );
 
         // text pipeline — uniforms in group(0), atlas textures in group(1).
@@ -299,15 +296,14 @@ impl WgpuGridRenderer {
             cols,
             rows,
             bg_cpu,
-            bg_buffers,
+            bg_buffer,
             fg_rows: init_fg_rows(rows),
-            fg_buffers,
-            fg_capacity: [initial_fg_capacity; FRAMES_IN_FLIGHT],
+            fg_buffer,
+            fg_capacity: initial_fg_capacity,
             fg_staging: Vec::new(),
             fg_live_count: 0,
             fg_dirty: true,
             bg_dirty: true,
-            frame: 0,
             uniform_buffer,
             bg_bind_group_layout,
             bg_bind_group,
@@ -346,14 +342,12 @@ impl WgpuGridRenderer {
         self.cols = cols;
         self.rows = rows;
         let bg_len = (cols as usize) * (rows as usize);
-        self.bg_cpu = std::array::from_fn(|_| vec![CellBg::TRANSPARENT; bg_len]);
-        self.bg_buffers =
-            std::array::from_fn(|_| alloc_bg_buffer(&self.device, cols, rows));
+        self.bg_cpu = vec![CellBg::TRANSPARENT; bg_len];
+        self.bg_buffer = alloc_bg_buffer(&self.device, cols, rows);
         self.fg_rows = init_fg_rows(rows);
         let initial_fg_capacity = bg_len.max(1);
-        self.fg_buffers =
-            std::array::from_fn(|_| alloc_fg_buffer(&self.device, initial_fg_capacity));
-        self.fg_capacity = [initial_fg_capacity; FRAMES_IN_FLIGHT];
+        self.fg_buffer = alloc_fg_buffer(&self.device, initial_fg_capacity);
+        self.fg_capacity = initial_fg_capacity;
         self.needs_full_rebuild = true;
         self.fg_dirty = true;
         self.bg_dirty = true;
@@ -362,7 +356,7 @@ impl WgpuGridRenderer {
             &self.device,
             &self.bg_bind_group_layout,
             &self.uniform_buffer,
-            &self.bg_buffers[0],
+            &self.bg_buffer,
         );
     }
 
@@ -379,7 +373,7 @@ impl WgpuGridRenderer {
         }
         let row_start = (row as usize) * (self.cols as usize);
         let row_len = (self.cols as usize).min(bg.len());
-        let cpu = &mut self.bg_cpu[0];
+        let cpu = &mut self.bg_cpu;
         cpu[row_start..row_start + row_len].copy_from_slice(&bg[..row_len]);
         for slot in &mut cpu[row_start + row_len..row_start + self.cols as usize] {
             *slot = CellBg::TRANSPARENT;
@@ -399,7 +393,7 @@ impl WgpuGridRenderer {
             return;
         }
         let row_start = (row as usize) * (self.cols as usize);
-        let cpu = &mut self.bg_cpu[0];
+        let cpu = &mut self.bg_cpu;
         for slot in &mut cpu[row_start..row_start + self.cols as usize] {
             *slot = CellBg::TRANSPARENT;
         }
@@ -493,9 +487,9 @@ impl WgpuGridRenderer {
 
         if self.bg_dirty {
             self.queue.write_buffer(
-                &self.bg_buffers[0],
+                &self.bg_buffer,
                 0,
-                bytemuck::cast_slice(&self.bg_cpu[0]),
+                bytemuck::cast_slice(&self.bg_cpu),
             );
             self.bg_dirty = false;
         }
@@ -506,7 +500,7 @@ impl WgpuGridRenderer {
     }
 
     /// Record the cell-text pass. Lazily flushes per-row CPU vecs to
-    /// `fg_buffers[0]` only when `fg_dirty` — saves ~(rows × cols ×
+    /// `fg_buffer` only when `fg_dirty` — saves ~(rows × cols ×
     /// 32 B) of memcpy on Noop/CursorOnly damage frames.
     pub fn render_text(
         &mut self,
@@ -528,13 +522,13 @@ impl WgpuGridRenderer {
                 self.fg_staging.extend_from_slice(row);
             }
 
-            if self.fg_staging.len() > self.fg_capacity[0] {
+            if self.fg_staging.len() > self.fg_capacity {
                 let new_cap = self.fg_staging.len().next_power_of_two();
-                self.fg_buffers[0] = alloc_fg_buffer(&self.device, new_cap);
-                self.fg_capacity[0] = new_cap;
+                self.fg_buffer = alloc_fg_buffer(&self.device, new_cap);
+                self.fg_capacity = new_cap;
             }
             self.queue.write_buffer(
-                &self.fg_buffers[0],
+                &self.fg_buffer,
                 0,
                 bytemuck::cast_slice(&self.fg_staging),
             );
@@ -550,7 +544,7 @@ impl WgpuGridRenderer {
         render_pass.set_pipeline(&self.text_pipeline);
         render_pass.set_bind_group(0, &self.text_uniform_bg, &[]);
         render_pass.set_bind_group(1, &self.text_atlas_bg, &[]);
-        render_pass.set_vertex_buffer(0, self.fg_buffers[0].slice(..));
+        render_pass.set_vertex_buffer(0, self.fg_buffer.slice(..));
         render_pass.draw(0..4, 0..instance_count as u32);
     }
 }
