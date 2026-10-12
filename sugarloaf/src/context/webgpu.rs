@@ -14,6 +14,10 @@ pub struct WgpuContext<'a> {
     pub supports_f16: bool,
     pub colorspace: Colorspace,
     pub max_texture_dimension_2d: u32,
+    /// Immutable grid pipelines shared by this window's terminal panels. The
+    /// context fixes both device and surface format for the cache's lifetime.
+    pub(crate) grid_pipelines:
+        std::sync::OnceLock<std::sync::Arc<crate::grid::webgpu::WgpuGridPipelines>>,
 }
 
 impl<'a> WgpuContext<'a> {
@@ -264,6 +268,7 @@ impl<'a> WgpuContext<'a> {
             supports_f16: false,
             colorspace: renderer_config.colorspace,
             max_texture_dimension_2d,
+            grid_pipelines: std::sync::OnceLock::new(),
         }
     }
 

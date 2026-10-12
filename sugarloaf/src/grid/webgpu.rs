@@ -10,6 +10,7 @@
 //! `CellText`, grayscale glyph atlas, instanced quad draws.
 
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 use super::atlas::{AtlasSlot, GlyphKey, RasterizedGlyph};
 use super::cell::{CellBg, CellText, GridUniforms};
@@ -181,6 +182,44 @@ impl WgpuGlyphAtlas {
     }
 }
 
+/// Pipeline layouts and shaders depend on the device and target format, not
+/// on terminal contents, size or font. Share them while keeping each panel's
+/// buffers, uniforms, bind groups and glyph atlases independent.
+pub(crate) struct WgpuGridPipelines {
+    bg_bind_group_layout: wgpu::BindGroupLayout,
+    text_uniform_bgl: wgpu::BindGroupLayout,
+    text_atlas_bgl: wgpu::BindGroupLayout,
+    bg_pipeline: wgpu::RenderPipeline,
+    text_pipeline: wgpu::RenderPipeline,
+}
+
+impl WgpuGridPipelines {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let bg_bind_group_layout = create_bg_bind_group_layout(device);
+        let text_uniform_bgl = create_text_uniform_bgl(device);
+        let text_atlas_bgl = create_text_atlas_bgl(device);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("grid.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid.wgsl").into()),
+        });
+        let bg_pipeline =
+            build_bg_pipeline(device, format, &bg_bind_group_layout, &shader);
+        let text_pipeline = build_text_pipeline(
+            device,
+            format,
+            &[Some(&text_uniform_bgl), Some(&text_atlas_bgl)],
+            &shader,
+        );
+        Self {
+            bg_bind_group_layout,
+            text_uniform_bgl,
+            text_atlas_bgl,
+            bg_pipeline,
+            text_pipeline,
+        }
+    }
+}
+
 pub struct WgpuGridRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -207,22 +246,11 @@ pub struct WgpuGridRenderer {
 
     uniform_buffer: wgpu::Buffer,
 
-    // bg pipeline
-    bg_bind_group_layout: wgpu::BindGroupLayout,
+    pipelines: Arc<WgpuGridPipelines>,
     bg_bind_group: wgpu::BindGroup,
-    bg_pipeline: wgpu::RenderPipeline,
-
-    // text pipeline. The bind-group-layout fields are retained for
-    // Phase 2 (recreating the atlas bind group when we grow/rotate
-    // the atlas texture); hence `#[allow(dead_code)]` for now.
-    #[allow(dead_code)]
-    text_uniform_bgl: wgpu::BindGroupLayout,
     text_uniform_bg: wgpu::BindGroup,
-    #[allow(dead_code)]
-    text_atlas_bgl: wgpu::BindGroupLayout,
     text_atlas_bg: wgpu::BindGroup,
     color_atlas_bound: bool,
-    text_pipeline: wgpu::RenderPipeline,
 
     atlas_grayscale: WgpuGlyphAtlas,
     atlas_color: WgpuGlyphAtlas,
@@ -234,9 +262,26 @@ pub struct WgpuGridRenderer {
 
 impl WgpuGridRenderer {
     pub fn new(ctx: &WgpuContext<'_>, cols: u32, rows: u32) -> Self {
-        let device = ctx.device.clone();
-        let queue = ctx.queue.clone();
+        let pipelines = ctx
+            .grid_pipelines
+            .get_or_init(|| Arc::new(WgpuGridPipelines::new(&ctx.device, ctx.format)))
+            .clone();
+        Self::new_with_pipelines(
+            ctx.device.clone(),
+            ctx.queue.clone(),
+            pipelines,
+            cols,
+            rows,
+        )
+    }
 
+    fn new_with_pipelines(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        pipelines: Arc<WgpuGridPipelines>,
+        cols: u32,
+        rows: u32,
+    ) -> Self {
         let bg_len = (cols as usize) * (rows as usize);
         // Queue writes and draws already use a single persistent buffer. wgpu
         // orders uploads before submission, so spare frame slots are unnecessary.
@@ -254,10 +299,9 @@ impl WgpuGridRenderer {
         });
 
         // bg pipeline — uniforms + storage buffer.
-        let bg_bind_group_layout = create_bg_bind_group_layout(&device);
         let bg_bind_group = create_bg_bind_group(
             &device,
-            &bg_bind_group_layout,
+            &pipelines.bg_bind_group_layout,
             &uniform_buffer,
             &bg_buffer,
         );
@@ -265,29 +309,13 @@ impl WgpuGridRenderer {
         // text pipeline — uniforms in group(0), atlas textures in group(1).
         let atlas_grayscale = WgpuGlyphAtlas::new_grayscale(&device, queue.clone());
         let atlas_color = WgpuGlyphAtlas::new_color(&device, queue.clone());
-        let text_uniform_bgl = create_text_uniform_bgl(&device);
         let text_uniform_bg =
-            create_text_uniform_bg(&device, &text_uniform_bgl, &uniform_buffer);
-        let text_atlas_bgl = create_text_atlas_bgl(&device);
+            create_text_uniform_bg(&device, &pipelines.text_uniform_bgl, &uniform_buffer);
         let text_atlas_bg = create_text_atlas_bg(
             &device,
-            &text_atlas_bgl,
+            &pipelines.text_atlas_bgl,
             atlas_grayscale.view(),
             atlas_color.view(),
-        );
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("grid.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid.wgsl").into()),
-        });
-
-        let bg_pipeline =
-            build_bg_pipeline(&device, ctx.format, &bg_bind_group_layout, &shader);
-        let text_pipeline = build_text_pipeline(
-            &device,
-            ctx.format,
-            &[Some(&text_uniform_bgl), Some(&text_atlas_bgl)],
-            &shader,
         );
 
         Self {
@@ -305,15 +333,11 @@ impl WgpuGridRenderer {
             fg_dirty: true,
             bg_dirty: true,
             uniform_buffer,
-            bg_bind_group_layout,
+            pipelines,
             bg_bind_group,
-            bg_pipeline,
-            text_uniform_bgl,
             text_uniform_bg,
-            text_atlas_bgl,
             text_atlas_bg,
             color_atlas_bound: false,
-            text_pipeline,
             atlas_grayscale,
             atlas_color,
             needs_full_rebuild: true,
@@ -354,7 +378,7 @@ impl WgpuGridRenderer {
         self.fg_live_count = 0;
         self.bg_bind_group = create_bg_bind_group(
             &self.device,
-            &self.bg_bind_group_layout,
+            &self.pipelines.bg_bind_group_layout,
             &self.uniform_buffer,
             &self.bg_buffer,
         );
@@ -494,7 +518,7 @@ impl WgpuGridRenderer {
             self.bg_dirty = false;
         }
 
-        render_pass.set_pipeline(&self.bg_pipeline);
+        render_pass.set_pipeline(&self.pipelines.bg_pipeline);
         render_pass.set_bind_group(0, &self.bg_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
     }
@@ -510,7 +534,7 @@ impl WgpuGridRenderer {
         if !self.color_atlas_bound && self.atlas_color.is_allocated() {
             self.text_atlas_bg = create_text_atlas_bg(
                 &self.device,
-                &self.text_atlas_bgl,
+                &self.pipelines.text_atlas_bgl,
                 self.atlas_grayscale.view(),
                 self.atlas_color.view(),
             );
@@ -541,7 +565,7 @@ impl WgpuGridRenderer {
             return;
         }
 
-        render_pass.set_pipeline(&self.text_pipeline);
+        render_pass.set_pipeline(&self.pipelines.text_pipeline);
         render_pass.set_bind_group(0, &self.text_uniform_bg, &[]);
         render_pass.set_bind_group(1, &self.text_atlas_bg, &[]);
         render_pass.set_vertex_buffer(0, self.fg_buffer.slice(..));
@@ -870,4 +894,167 @@ fn build_text_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+#[cfg(test)]
+mod gpu_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn shared_pipelines_keep_panel_state_separate_after_resize_and_buffer_growth() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter =
+            futures::executor::block_on(instance.request_adapter(&Default::default()))
+                .unwrap();
+        let (device, queue) = futures::executor::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let pipelines = Arc::new(WgpuGridPipelines::new(
+            &device,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ));
+        let mut left = WgpuGridRenderer::new_with_pipelines(
+            device.clone(),
+            queue.clone(),
+            pipelines.clone(),
+            3,
+            1,
+        );
+        let mut right = WgpuGridRenderer::new_with_pipelines(
+            device.clone(),
+            queue.clone(),
+            pipelines.clone(),
+            3,
+            1,
+        );
+        let output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shared pipeline test target"),
+            size: wgpu::Extent3d {
+                width: 3,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = output.create_view(&Default::default());
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let uniforms = |grid: &WgpuGridRenderer| {
+            let mut values = GridUniforms::zeroed();
+            values.projection = [
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+            ];
+            values.grid_size = [grid.cols, grid.rows];
+            values.cell_size = [1., 1.];
+            values.cursor_pos = [u32::MAX; 2];
+            // Use the shader's already-in-output-space path so this test
+            // checks panel isolation independently of the sRGB-to-P3 matrix.
+            values.input_colorspace = 1;
+            values
+        };
+
+        for resize in [false, true] {
+            if resize {
+                left.resize(4, 2);
+            }
+            // Force foreground capacity growth with degenerate, invisible
+            // glyph quads. Exercise both shared pipelines and all bind groups.
+            left.write_row(
+                0,
+                &vec![
+                    CellBg {
+                        rgba: [255, 0, 0, 255]
+                    };
+                    left.cols as usize
+                ],
+                &vec![CellText::default(); 9],
+            );
+            right.write_row(
+                0,
+                &[CellBg {
+                    rgba: [0, 0, 255, 255],
+                }; 3],
+                &[],
+            );
+            let mut left_uniforms = uniforms(&left);
+            left_uniforms.cursor_pos = [0, 0];
+            left_uniforms.cursor_bg_color = [0., 1., 0., 1.];
+            let right_uniforms = uniforms(&right);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_scissor_rect(0, 0, 2, 1);
+                left.render_bg(&mut pass, &left_uniforms);
+                left.render_text(&mut pass, &left_uniforms);
+                pass.set_scissor_rect(2, 0, 1, 1);
+                right.render_bg(&mut pass, &right_uniforms);
+                right.render_text(&mut pass, &right_uniforms);
+            }
+            encoder.copy_texture_to_buffer(
+                output.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(1),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 3,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit([encoder.finish()]);
+            let (send, receive) = std::sync::mpsc::channel();
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    send.send(result).unwrap();
+                });
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            receive.recv().unwrap().unwrap();
+            assert_eq!(
+                &readback.slice(..).get_mapped_range().unwrap()[..12],
+                &[0, 255, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255]
+            );
+            readback.unmap();
+            assert!(Arc::ptr_eq(&left.pipelines, &right.pipelines));
+            assert!(Arc::ptr_eq(&left.pipelines, &pipelines));
+        }
+        assert!(futures::executor::block_on(errors.pop()).is_none());
+    }
 }
