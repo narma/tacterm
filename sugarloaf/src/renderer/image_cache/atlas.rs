@@ -155,6 +155,10 @@ impl AtlasAllocator {
     /// texture in lock-step.
     pub fn grow_to(&mut self, new_width: u16, new_height: u16) {
         debug_assert!(new_width >= self.width && new_height >= self.height);
+        let added_width = new_width - self.width;
+        for shelf in &mut self.shelves {
+            shelf.width += added_width;
+        }
         self.width = new_width;
         self.height = new_height;
     }
@@ -273,6 +277,17 @@ mod tests {
         // Should fail - no space left
         let pos2 = atlas.allocate(1, 1);
         assert_eq!(pos2, None);
+    }
+
+    #[test]
+    fn growth_reuses_shelves_without_moving_existing_slots() {
+        let mut atlas = AtlasAllocator::new(20, 20);
+        assert_eq!(atlas.allocate(19, 19), Some((0, 0)));
+        assert_eq!(atlas.allocate(19, 19), None);
+        atlas.grow_to(40, 40);
+        assert_eq!(atlas.allocate(19, 19), Some((20, 0)));
+        assert_eq!(atlas.allocate(39, 19), Some((0, 20)));
+        assert_eq!(atlas.allocate(1, 1), None);
     }
 
     #[test]

@@ -19,6 +19,7 @@ use crate::renderer::image_cache::atlas::AtlasAllocator;
 
 const CURSOR_ROW_SLOTS: usize = 2;
 const ATLAS_SIZE: u32 = 2048;
+const COLOR_ATLAS_INITIAL_SIZE: u32 = 256;
 
 pub struct WgpuGlyphAtlas {
     device: wgpu::Device,
@@ -69,7 +70,9 @@ impl WgpuGlyphAtlas {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -77,7 +80,18 @@ impl WgpuGlyphAtlas {
             device: device.clone(),
             texture,
             view,
-            allocator: AtlasAllocator::new(ATLAS_SIZE as u16, ATLAS_SIZE as u16),
+            allocator: AtlasAllocator::new(
+                if bytes_per_pixel == 4 {
+                    COLOR_ATLAS_INITIAL_SIZE
+                } else {
+                    ATLAS_SIZE
+                } as u16,
+                if bytes_per_pixel == 4 {
+                    COLOR_ATLAS_INITIAL_SIZE
+                } else {
+                    ATLAS_SIZE
+                } as u16,
+            ),
             slots: FxHashMap::default(),
             queue,
             bytes_per_pixel,
@@ -108,27 +122,26 @@ impl WgpuGlyphAtlas {
             return Some(slot);
         }
 
-        let (x, y) = self.allocator.allocate(glyph.width, glyph.height)?;
-        if !self.is_allocated() {
-            // A valid 1x1 binding is enough until the first color glyph. Keep
-            // the full allocator capacity, so emoji-heavy screens never need
-            // more cache rotations than before.
-            self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("grid.atlas_color"),
-                size: wgpu::Extent3d {
-                    width: ATLAS_SIZE,
-                    height: ATLAS_SIZE,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            self.view = self.texture.create_view(&Default::default());
+        // Reject impossible glyphs before allocating or growing GPU storage.
+        if u32::from(glyph.width) + 1 > ATLAS_SIZE
+            || u32::from(glyph.height) + 1 > ATLAS_SIZE
+        {
+            return None;
+        }
+        let (x, y) = loop {
+            if let Some(position) = self.allocator.allocate(glyph.width, glyph.height) {
+                break position;
+            }
+            let (size, _) = self.allocator.dimensions();
+            if self.bytes_per_pixel != 4 || u32::from(size) == ATLAS_SIZE {
+                return None;
+            }
+            let next_size = (u32::from(size) * 2).min(ATLAS_SIZE);
+            self.allocator.grow_to(next_size as u16, next_size as u16);
+        };
+        let (size, _) = self.allocator.dimensions();
+        if self.texture.width() != u32::from(size) {
+            self.grow_color_texture(u32::from(size));
         }
         let slot = AtlasSlot {
             x,
@@ -167,6 +180,42 @@ impl WgpuGlyphAtlas {
         Some(slot)
     }
 
+    fn grow_color_texture(&mut self, size: u32) {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("grid.atlas_color"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        if self.is_allocated() {
+            // Preserve pixel coordinates and every cached glyph. Queue ordering
+            // flushes pending uploads before this copy and later glyph uploads.
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_texture(
+                self.texture.as_image_copy(),
+                texture.as_image_copy(),
+                self.texture.size(),
+            );
+            self.queue.submit([encoder.finish()]);
+        }
+        self.view = texture.create_view(&Default::default());
+        self.texture = texture;
+    }
+
+    pub fn size(&self) -> u32 {
+        self.texture.width()
+    }
+
     pub fn clear(&mut self) {
         self.allocator.clear();
         self.slots.clear();
@@ -178,7 +227,7 @@ impl WgpuGlyphAtlas {
     }
 
     pub fn is_allocated(&self) -> bool {
-        self.texture.width() == ATLAS_SIZE
+        self.texture.width() > 1
     }
 }
 
@@ -250,7 +299,7 @@ pub struct WgpuGridRenderer {
     bg_bind_group: wgpu::BindGroup,
     text_uniform_bg: wgpu::BindGroup,
     text_atlas_bg: wgpu::BindGroup,
-    color_atlas_bound: bool,
+    color_atlas_bound_size: u32,
 
     atlas_grayscale: WgpuGlyphAtlas,
     atlas_color: WgpuGlyphAtlas,
@@ -337,7 +386,7 @@ impl WgpuGridRenderer {
             bg_bind_group,
             text_uniform_bg,
             text_atlas_bg,
-            color_atlas_bound: false,
+            color_atlas_bound_size: 1,
             atlas_grayscale,
             atlas_color,
             needs_full_rebuild: true,
@@ -531,14 +580,14 @@ impl WgpuGridRenderer {
         render_pass: &mut wgpu::RenderPass<'_>,
         _uniforms: &GridUniforms,
     ) {
-        if !self.color_atlas_bound && self.atlas_color.is_allocated() {
+        if self.color_atlas_bound_size != self.atlas_color.size() {
             self.text_atlas_bg = create_text_atlas_bg(
                 &self.device,
                 &self.pipelines.text_atlas_bgl,
                 self.atlas_grayscale.view(),
                 self.atlas_color.view(),
             );
-            self.color_atlas_bound = true;
+            self.color_atlas_bound_size = self.atlas_color.size();
         }
         if self.fg_dirty {
             self.fg_staging.clear();

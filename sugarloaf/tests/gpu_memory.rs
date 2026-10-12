@@ -7,12 +7,17 @@ use sugarloaf::wgpu;
 /// wgpu --test gpu_memory -- --ignored. No window or desktop input is needed.
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn lazy_color_atlas_uploads_first_glyph_and_survives_clear() {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+fn color_atlas_grows_preserving_pixels_and_survives_clear() {
+    let instance = wgpu::Instance::new(
+        wgpu::InstanceDescriptor::new_without_display_handle().with_env(),
+    );
     let adapter =
         futures::executor::block_on(instance.request_adapter(&Default::default()))
             .unwrap();
+    println!(
+        "Atlas GPU validation backend: {:?}",
+        adapter.get_info().backend
+    );
     let (device, queue) =
         futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             memory_hints: wgpu::MemoryHints::MemoryUsage,
@@ -54,21 +59,52 @@ fn lazy_color_atlas_uploads_first_glyph_and_survives_clear() {
         "rejected glyphs must not allocate a texture"
     );
 
-    for pixel in [[12u8, 34, 56, 255], [90u8, 80, 70, 255]] {
-        atlas.clear();
-        let slot = atlas
-            .insert(
-                key,
-                RasterizedGlyph {
-                    width: 1,
-                    height: 1,
-                    bytes: &pixel,
-                    ..empty
-                },
-            )
-            .unwrap();
+    let original_pixel = [12u8, 34, 56, 255];
+    for round in 0..5 {
+        let pixel = if round == 4 {
+            [90u8, 80, 70, 255]
+        } else {
+            original_pixel
+        };
+        if round == 0 || round == 4 {
+            atlas.clear();
+            atlas
+                .insert(
+                    key,
+                    RasterizedGlyph {
+                        width: 1,
+                        height: 1,
+                        bytes: &pixel,
+                        ..empty
+                    },
+                )
+                .unwrap();
+        } else {
+            let width = [0, 300, 700, 1300][round];
+            let bytes = vec![255; width as usize * 4];
+            atlas
+                .insert(
+                    GlyphKey {
+                        glyph_id: round as u32 + 1,
+                        ..key
+                    },
+                    RasterizedGlyph {
+                        width,
+                        height: 1,
+                        bytes: &bytes,
+                        ..empty
+                    },
+                )
+                .unwrap();
+        }
         assert!(atlas.is_allocated());
-        assert_eq!(atlas.lookup(key).unwrap().x, slot.x);
+        assert_eq!(atlas.size(), [256, 512, 1024, 2048, 2048][round]);
+        let slot = atlas.lookup(key).unwrap();
+        assert_eq!(
+            (slot.x, slot.y),
+            (0, 0),
+            "growth preserves existing coordinates"
+        );
         // Sampling through a new binding also checks that consumers can bind
         // the materialized view, rather than the original 1x1 placeholder.
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

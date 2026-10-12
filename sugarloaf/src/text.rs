@@ -139,7 +139,7 @@ struct TextWgpuState {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     atlas_bind_group: wgpu::BindGroup,
-    color_atlas_bound: bool,
+    color_atlas_bound_size: u32,
     atlas_bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     instance_buffer: wgpu::Buffer,
@@ -1107,7 +1107,7 @@ impl Text {
             uniform_buffer,
             uniform_bind_group,
             atlas_bind_group,
-            color_atlas_bound: false,
+            color_atlas_bound_size: 1,
             atlas_bind_group_layout: atlas_bgl,
             pipeline,
             instance_buffer,
@@ -1131,14 +1131,14 @@ impl Text {
             return;
         };
 
-        if !state.color_atlas_bound && state.atlas_color.is_allocated() {
+        if state.color_atlas_bound_size != state.atlas_color.size() {
             state.atlas_bind_group = create_text_atlas_bg_wgpu(
                 &state.device,
                 &state.atlas_bind_group_layout,
                 state.atlas_grayscale.view(),
                 state.atlas_color.view(),
             );
-            state.color_atlas_bound = true;
+            state.color_atlas_bound_size = state.atlas_color.size();
         }
 
         // Upload uniforms (viewport + 8 bytes pad).
