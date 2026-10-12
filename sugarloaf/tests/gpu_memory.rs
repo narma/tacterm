@@ -8,6 +8,16 @@ use sugarloaf::wgpu;
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn color_atlas_grows_preserving_pixels_and_survives_clear() {
+    check_atlas_growth(true);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn grayscale_atlas_grows_preserving_pixels_and_survives_clear() {
+    check_atlas_growth(false);
+}
+
+fn check_atlas_growth(color: bool) {
     let instance = wgpu::Instance::new(
         wgpu::InstanceDescriptor::new_without_display_handle().with_env(),
     );
@@ -25,8 +35,12 @@ fn color_atlas_grows_preserving_pixels_and_survives_clear() {
         }))
         .unwrap();
     let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let mut atlas = WgpuGlyphAtlas::new_color(&device, queue.clone());
-    assert!(!atlas.is_allocated());
+    let mut atlas = if color {
+        WgpuGlyphAtlas::new_color(&device, queue.clone())
+    } else {
+        WgpuGlyphAtlas::new_grayscale(&device, queue.clone())
+    };
+    let initial_size = atlas.size();
     let key = GlyphKey {
         font_id: 0,
         glyph_id: 1,
@@ -41,8 +55,8 @@ fn color_atlas_grows_preserving_pixels_and_survives_clear() {
     };
     atlas.insert(key, empty).unwrap();
     assert!(
-        !atlas.is_allocated(),
-        "empty glyphs must not allocate a color texture"
+        atlas.size() == initial_size,
+        "empty glyphs must not grow an atlas"
     );
     assert!(atlas
         .insert(
@@ -55,18 +69,37 @@ fn color_atlas_grows_preserving_pixels_and_survives_clear() {
         )
         .is_none());
     assert!(
-        !atlas.is_allocated(),
-        "rejected glyphs must not allocate a texture"
+        atlas.size() == initial_size,
+        "rejected glyphs must not grow an atlas"
     );
 
-    let original_pixel = [12u8, 34, 56, 255];
-    for round in 0..5 {
-        let pixel = if round == 4 {
-            [90u8, 80, 70, 255]
+    let original_pixel = if color {
+        [12u8, 34, 56, 255]
+    } else {
+        [12u8, 0, 0, 255]
+    };
+    let widths: &[u16] = if color {
+        &[0, 300, 700, 1300, 0]
+    } else {
+        &[0, 700, 1300, 0]
+    };
+    let sizes: &[u32] = if color {
+        &[256, 512, 1024, 2048, 2048]
+    } else {
+        &[512, 1024, 2048, 2048]
+    };
+    let bpp = if color { 4 } else { 1 };
+    for round in 0..widths.len() {
+        let pixel = if round == widths.len() - 1 {
+            if color {
+                [90u8, 80, 70, 255]
+            } else {
+                [90u8, 0, 0, 255]
+            }
         } else {
             original_pixel
         };
-        if round == 0 || round == 4 {
+        if round == 0 || round == widths.len() - 1 {
             atlas.clear();
             atlas
                 .insert(
@@ -74,14 +107,14 @@ fn color_atlas_grows_preserving_pixels_and_survives_clear() {
                     RasterizedGlyph {
                         width: 1,
                         height: 1,
-                        bytes: &pixel,
+                        bytes: &pixel[..bpp],
                         ..empty
                     },
                 )
                 .unwrap();
         } else {
-            let width = [0, 300, 700, 1300][round];
-            let bytes = vec![255; width as usize * 4];
+            let width = widths[round];
+            let bytes = vec![255; width as usize * bpp];
             atlas
                 .insert(
                     GlyphKey {
@@ -98,7 +131,7 @@ fn color_atlas_grows_preserving_pixels_and_survives_clear() {
                 .unwrap();
         }
         assert!(atlas.is_allocated());
-        assert_eq!(atlas.size(), [256, 512, 1024, 2048, 2048][round]);
+        assert_eq!(atlas.size(), sizes[round]);
         let slot = atlas.lookup(key).unwrap();
         assert_eq!(
             (slot.x, slot.y),

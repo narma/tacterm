@@ -20,6 +20,7 @@ use crate::renderer::image_cache::atlas::AtlasAllocator;
 const CURSOR_ROW_SLOTS: usize = 2;
 const ATLAS_SIZE: u32 = 2048;
 const COLOR_ATLAS_INITIAL_SIZE: u32 = 256;
+const GRAYSCALE_ATLAS_INITIAL_SIZE: u32 = 512;
 
 pub struct WgpuGlyphAtlas {
     device: wgpu::Device,
@@ -62,8 +63,16 @@ impl WgpuGlyphAtlas {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
-                width: if bytes_per_pixel == 4 { 1 } else { ATLAS_SIZE },
-                height: if bytes_per_pixel == 4 { 1 } else { ATLAS_SIZE },
+                width: if bytes_per_pixel == 4 {
+                    1
+                } else {
+                    GRAYSCALE_ATLAS_INITIAL_SIZE
+                },
+                height: if bytes_per_pixel == 4 {
+                    1
+                } else {
+                    GRAYSCALE_ATLAS_INITIAL_SIZE
+                },
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -84,12 +93,12 @@ impl WgpuGlyphAtlas {
                 if bytes_per_pixel == 4 {
                     COLOR_ATLAS_INITIAL_SIZE
                 } else {
-                    ATLAS_SIZE
+                    GRAYSCALE_ATLAS_INITIAL_SIZE
                 } as u16,
                 if bytes_per_pixel == 4 {
                     COLOR_ATLAS_INITIAL_SIZE
                 } else {
-                    ATLAS_SIZE
+                    GRAYSCALE_ATLAS_INITIAL_SIZE
                 } as u16,
             ),
             slots: FxHashMap::default(),
@@ -133,7 +142,7 @@ impl WgpuGlyphAtlas {
                 break position;
             }
             let (size, _) = self.allocator.dimensions();
-            if self.bytes_per_pixel != 4 || u32::from(size) == ATLAS_SIZE {
+            if u32::from(size) == ATLAS_SIZE {
                 return None;
             }
             let next_size = (u32::from(size) * 2).min(ATLAS_SIZE);
@@ -141,7 +150,7 @@ impl WgpuGlyphAtlas {
         };
         let (size, _) = self.allocator.dimensions();
         if self.texture.width() != u32::from(size) {
-            self.grow_color_texture(u32::from(size));
+            self.grow_texture(u32::from(size));
         }
         let slot = AtlasSlot {
             x,
@@ -180,9 +189,13 @@ impl WgpuGlyphAtlas {
         Some(slot)
     }
 
-    fn grow_color_texture(&mut self, size: u32) {
+    fn grow_texture(&mut self, size: u32) {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("grid.atlas_color"),
+            label: Some(if self.bytes_per_pixel == 4 {
+                "grid.atlas_color"
+            } else {
+                "grid.atlas_grayscale"
+            }),
             size: wgpu::Extent3d {
                 width: size,
                 height: size,
@@ -191,7 +204,7 @@ impl WgpuGlyphAtlas {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: self.texture.format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
@@ -299,7 +312,7 @@ pub struct WgpuGridRenderer {
     bg_bind_group: wgpu::BindGroup,
     text_uniform_bg: wgpu::BindGroup,
     text_atlas_bg: wgpu::BindGroup,
-    color_atlas_bound_size: u32,
+    atlas_bound_sizes: [u32; 2],
 
     atlas_grayscale: WgpuGlyphAtlas,
     atlas_color: WgpuGlyphAtlas,
@@ -386,7 +399,7 @@ impl WgpuGridRenderer {
             bg_bind_group,
             text_uniform_bg,
             text_atlas_bg,
-            color_atlas_bound_size: 1,
+            atlas_bound_sizes: [atlas_grayscale.size(), atlas_color.size()],
             atlas_grayscale,
             atlas_color,
             needs_full_rebuild: true,
@@ -580,14 +593,17 @@ impl WgpuGridRenderer {
         render_pass: &mut wgpu::RenderPass<'_>,
         _uniforms: &GridUniforms,
     ) {
-        if self.color_atlas_bound_size != self.atlas_color.size() {
+        if self.atlas_bound_sizes
+            != [self.atlas_grayscale.size(), self.atlas_color.size()]
+        {
             self.text_atlas_bg = create_text_atlas_bg(
                 &self.device,
                 &self.pipelines.text_atlas_bgl,
                 self.atlas_grayscale.view(),
                 self.atlas_color.view(),
             );
-            self.color_atlas_bound_size = self.atlas_color.size();
+            self.atlas_bound_sizes =
+                [self.atlas_grayscale.size(), self.atlas_color.size()];
         }
         if self.fg_dirty {
             self.fg_staging.clear();
@@ -1022,6 +1038,25 @@ mod gpu_tests {
         for resize in [false, true] {
             if resize {
                 left.resize(4, 2);
+                // A background panel's glyph cache may grow independently.
+                // Rendering must refresh the grayscale binding too.
+                right
+                    .atlas_grayscale
+                    .insert(
+                        GlyphKey {
+                            font_id: 0,
+                            glyph_id: 1,
+                            size_bucket: 64,
+                        },
+                        RasterizedGlyph {
+                            width: 700,
+                            height: 1,
+                            bearing_x: 0,
+                            bearing_y: 0,
+                            bytes: &[255; 700],
+                        },
+                    )
+                    .unwrap();
             }
             // Force foreground capacity growth with degenerate, invisible
             // glyph quads. Exercise both shared pipelines and all bind groups.
@@ -1103,6 +1138,10 @@ mod gpu_tests {
             readback.unmap();
             assert!(Arc::ptr_eq(&left.pipelines, &right.pipelines));
             assert!(Arc::ptr_eq(&left.pipelines, &pipelines));
+            assert_eq!(
+                right.atlas_bound_sizes,
+                [if resize { 1024 } else { 512 }, 1]
+            );
         }
         assert!(futures::executor::block_on(errors.pop()).is_none());
     }
