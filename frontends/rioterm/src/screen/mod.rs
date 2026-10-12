@@ -4236,6 +4236,11 @@ impl Screen<'_> {
             }
 
             // --- ensure every panel has a matching GridRenderer ---
+            // Closed panes must release their glyph atlases and buffers. Keep
+            // caches for live background tabs so switching tabs stays fast.
+            let contexts = &mut self.context_manager;
+            self.grids
+                .retain(|route_id, _| contexts.get_by_route_id(*route_id).is_some());
             for p in &panels {
                 self.ensure_grid(p.route_id, p.cols, p.rows);
             }

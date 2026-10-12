@@ -45,6 +45,12 @@ pub struct Atlas {
 
 impl Atlas {
     fn new(kind: AtlasKind, size: u16) -> Self {
+        let mut atlas = Self::new_lazy(kind, size);
+        atlas.ensure_buffer(size);
+        atlas
+    }
+
+    fn new_lazy(kind: AtlasKind, size: u16) -> Self {
         let channels = match kind {
             AtlasKind::Mask => 1,
             AtlasKind::Color => 4,
@@ -52,10 +58,17 @@ impl Atlas {
 
         Self {
             alloc: AtlasAllocator::new(size, size),
-            buffer: vec![0; size as usize * size as usize * channels],
+            buffer: Vec::new(),
             fresh: true,
             dirty: false,
             channels,
+        }
+    }
+
+    fn ensure_buffer(&mut self, size: u16) {
+        if self.buffer.is_empty() {
+            self.buffer
+                .resize(size as usize * size as usize * self.channels, 0);
         }
     }
 }
@@ -132,8 +145,10 @@ impl ImageCache {
                     size: wgpu::Extent3d {
                         // Clamped to the device limit: downlevel GPUs
                         // (GLES 3.1 class) report 2048 and reject 4096.
-                        width: max_texture_size as u32,
-                        height: max_texture_size as u32,
+                        // Keep valid bindings without reserving a legacy atlas
+                        // until something actually allocates an image in it.
+                        width: 1,
+                        height: 1,
                         depth_or_array_layers: 1,
                     },
                     view_formats: &[],
@@ -151,8 +166,8 @@ impl ImageCache {
                 let color_texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("rich_text color atlas 0"),
                     size: wgpu::Extent3d {
-                        width: max_texture_size as u32,
-                        height: max_texture_size as u32,
+                        width: 1,
+                        height: 1,
                         depth_or_array_layers: 1,
                     },
                     view_formats: &[],
@@ -167,13 +182,13 @@ impl ImageCache {
                     color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                 let color_atlases = vec![ColorAtlasWithTexture {
-                    atlas: Atlas::new(AtlasKind::Color, max_texture_size),
+                    atlas: Atlas::new_lazy(AtlasKind::Color, max_texture_size),
                     texture: ColorAtlasTexture::Wgpu(color_texture, color_texture_view),
                 }];
 
                 Self {
                     entries: Vec::new(),
-                    mask_atlas: Atlas::new(AtlasKind::Mask, max_texture_size),
+                    mask_atlas: Atlas::new_lazy(AtlasKind::Mask, max_texture_size),
                     color_atlases,
                     max_texture_size,
                     device_queue: DeviceQueue::Wgpu {
@@ -314,6 +329,9 @@ impl ImageCache {
             ContentType::Color => AtlasKind::Color,
         };
 
+        #[cfg(feature = "wgpu")]
+        self.ensure_wgpu_atlas(atlas_kind);
+
         // Handle mask atlas (single atlas)
         if atlas_kind == AtlasKind::Mask {
             let atlas_data = self.mask_atlas.alloc.allocate(width, height);
@@ -439,6 +457,61 @@ impl ImageCache {
             width, height, new_atlas_index
         );
         ImageId::new(entry_index as u32, request.has_alpha)
+    }
+
+    /// Materialize only the legacy atlas being used. Grid text, UI text and
+    /// protocol image overlays have their own textures and never need these.
+    #[cfg(feature = "wgpu")]
+    fn ensure_wgpu_atlas(&mut self, kind: AtlasKind) {
+        let DeviceQueue::Wgpu {
+            device,
+            mask_texture,
+            mask_texture_view,
+            ..
+        } = &mut self.device_queue
+        else {
+            return;
+        };
+        let create = |format, label| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: self.max_texture_size as u32,
+                    height: self.max_texture_size as u32,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        match kind {
+            AtlasKind::Mask => {
+                self.mask_atlas.ensure_buffer(self.max_texture_size);
+                if mask_texture.width() == 1 {
+                    *mask_texture =
+                        create(wgpu::TextureFormat::R8Unorm, "rich_text mask atlas");
+                    *mask_texture_view = mask_texture.create_view(&Default::default());
+                }
+            }
+            AtlasKind::Color => {
+                let first = &mut self.color_atlases[0];
+                first.atlas.ensure_buffer(self.max_texture_size);
+                if let ColorAtlasTexture::Wgpu(texture, view) = &mut first.texture {
+                    if texture.width() == 1 {
+                        *texture = create(
+                            wgpu::TextureFormat::Rgba8Unorm,
+                            "rich_text color atlas 0",
+                        );
+                        *view = texture.create_view(&Default::default());
+                    }
+                }
+            }
+        }
     }
 
     /// Create a new color atlas with its own GPU texture
@@ -747,11 +820,19 @@ impl ImageCache {
         self.entries.clear();
 
         // Reset mask atlas
-        self.mask_atlas = Atlas::new(AtlasKind::Mask, self.max_texture_size);
+        self.mask_atlas = if self.mask_atlas.buffer.is_empty() {
+            Atlas::new_lazy(AtlasKind::Mask, self.max_texture_size)
+        } else {
+            Atlas::new(AtlasKind::Mask, self.max_texture_size)
+        };
 
         // Keep only first color atlas, reset others
         if let Some(first) = self.color_atlases.first_mut() {
-            first.atlas = Atlas::new(AtlasKind::Color, self.max_texture_size);
+            first.atlas = if first.atlas.buffer.is_empty() {
+                Atlas::new_lazy(AtlasKind::Color, self.max_texture_size)
+            } else {
+                Atlas::new(AtlasKind::Color, self.max_texture_size)
+            };
         }
         self.color_atlases.truncate(1);
 

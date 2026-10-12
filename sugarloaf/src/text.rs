@@ -139,7 +139,7 @@ struct TextWgpuState {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     atlas_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)] // retained for future atlas-bind-group recreation on atlas grow
+    color_atlas_bound: bool,
     atlas_bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     instance_buffer: wgpu::Buffer,
@@ -1107,6 +1107,7 @@ impl Text {
             uniform_buffer,
             uniform_bind_group,
             atlas_bind_group,
+            color_atlas_bound: false,
             atlas_bind_group_layout: atlas_bgl,
             pipeline,
             instance_buffer,
@@ -1129,6 +1130,16 @@ impl Text {
         let Some(state) = self.wgpu.as_mut() else {
             return;
         };
+
+        if !state.color_atlas_bound && state.atlas_color.is_allocated() {
+            state.atlas_bind_group = create_text_atlas_bg_wgpu(
+                &state.device,
+                &state.atlas_bind_group_layout,
+                state.atlas_grayscale.view(),
+                state.atlas_color.view(),
+            );
+            state.color_atlas_bound = true;
+        }
 
         // Upload uniforms (viewport + 8 bytes pad).
         let uniforms: [f32; 4] = [viewport[0], viewport[1], 0.0, 0.0];

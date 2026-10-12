@@ -21,6 +21,7 @@ const CURSOR_ROW_SLOTS: usize = 2;
 const ATLAS_SIZE: u32 = 2048;
 
 pub struct WgpuGlyphAtlas {
+    device: wgpu::Device,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     allocator: AtlasAllocator,
@@ -60,8 +61,8 @@ impl WgpuGlyphAtlas {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
-                width: ATLAS_SIZE,
-                height: ATLAS_SIZE,
+                width: if bytes_per_pixel == 4 { 1 } else { ATLAS_SIZE },
+                height: if bytes_per_pixel == 4 { 1 } else { ATLAS_SIZE },
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -73,6 +74,7 @@ impl WgpuGlyphAtlas {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self {
+            device: device.clone(),
             texture,
             view,
             allocator: AtlasAllocator::new(ATLAS_SIZE as u16, ATLAS_SIZE as u16),
@@ -107,6 +109,27 @@ impl WgpuGlyphAtlas {
         }
 
         let (x, y) = self.allocator.allocate(glyph.width, glyph.height)?;
+        if !self.is_allocated() {
+            // A valid 1x1 binding is enough until the first color glyph. Keep
+            // the full allocator capacity, so emoji-heavy screens never need
+            // more cache rotations than before.
+            self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("grid.atlas_color"),
+                size: wgpu::Extent3d {
+                    width: ATLAS_SIZE,
+                    height: ATLAS_SIZE,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.view = self.texture.create_view(&Default::default());
+        }
         let slot = AtlasSlot {
             x,
             y,
@@ -153,6 +176,10 @@ impl WgpuGlyphAtlas {
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
+
+    pub fn is_allocated(&self) -> bool {
+        self.texture.width() == ATLAS_SIZE
+    }
 }
 
 pub struct WgpuGridRenderer {
@@ -198,6 +225,7 @@ pub struct WgpuGridRenderer {
     #[allow(dead_code)]
     text_atlas_bgl: wgpu::BindGroupLayout,
     text_atlas_bg: wgpu::BindGroup,
+    color_atlas_bound: bool,
     text_pipeline: wgpu::RenderPipeline,
 
     atlas_grayscale: WgpuGlyphAtlas,
@@ -288,6 +316,7 @@ impl WgpuGridRenderer {
             text_uniform_bg,
             text_atlas_bgl,
             text_atlas_bg,
+            color_atlas_bound: false,
             text_pipeline,
             atlas_grayscale,
             atlas_color,
@@ -484,6 +513,15 @@ impl WgpuGridRenderer {
         render_pass: &mut wgpu::RenderPass<'_>,
         _uniforms: &GridUniforms,
     ) {
+        if !self.color_atlas_bound && self.atlas_color.is_allocated() {
+            self.text_atlas_bg = create_text_atlas_bg(
+                &self.device,
+                &self.text_atlas_bgl,
+                self.atlas_grayscale.view(),
+                self.atlas_color.view(),
+            );
+            self.color_atlas_bound = true;
+        }
         if self.fg_dirty {
             self.fg_staging.clear();
             for row in &self.fg_rows {

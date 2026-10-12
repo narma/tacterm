@@ -126,15 +126,28 @@ impl<'a> WgpuContext<'a> {
             .expect("Request adapter")
         };
         let request_device = |adapter: &wgpu::Adapter| {
-            if let Ok(result) = futures::executor::block_on(
-                adapter.request_device(&wgpu::DeviceDescriptor::default()),
-            ) {
+            // Terminal resources are small compared with a game's. On Windows,
+            // wgpu's performance allocator reserves 128–256 MiB per device-local
+            // heap, even when only a fraction is used. Keep the glyph caches and
+            // rendering pipeline intact, but let the allocator start with smaller
+            // blocks and grow them as needed. Other platforms keep their defaults.
+            let memory_hints = if cfg!(target_os = "windows") {
+                wgpu::MemoryHints::MemoryUsage
+            } else {
+                wgpu::MemoryHints::Performance
+            };
+            if let Ok(result) = futures::executor::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    memory_hints: memory_hints.clone(),
+                    ..Default::default()
+                },
+            )) {
                 Ok((result.0, result.1))
             } else {
                 // These downlevel limits will allow the code to run on all possible hardware
                 futures::executor::block_on(adapter.request_device(
                     &wgpu::DeviceDescriptor {
-                        memory_hints: wgpu::MemoryHints::Performance,
+                        memory_hints,
                         label: None,
                         required_features: wgpu::Features::empty(),
                         required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
