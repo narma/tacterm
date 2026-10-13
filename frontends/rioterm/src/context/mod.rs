@@ -1365,12 +1365,11 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
             let current = self.current();
             let cursor = current.cursor_from_ref();
-            let mut dimension = current.dimension;
-
-            // If current has splits then shouldn't use that dimension
-            if self.current_grid().len() > 1 {
-                dimension = self.current_grid().grid_dimension();
-            }
+            // Panel dimensions exclude window margins after the layout pass.
+            // Always inherit the full window size, otherwise each new tab
+            // subtracts the tab strip (and other margins) again.
+            let mut dimension = self.current_grid().grid_dimension();
+            dimension.original_font_size = current.dimension.original_font_size;
 
             match ContextManager::create_context(
                 (&cursor, current.renderable_content.has_blinking_enabled),
@@ -1521,6 +1520,51 @@ pub mod test {
             ContextManager::start_with_capacity(5, VoidListener {}, window_id).unwrap();
         context_manager.increase_capacity(3);
         assert_eq!(context_manager.capacity, 8);
+    }
+
+    #[test]
+    fn new_tabs_preserve_window_size_after_panel_layout() {
+        let mut manager =
+            ContextManager::start_with_capacity(12, VoidListener {}, WindowId::from(0))
+                .unwrap();
+
+        // Model a maximized window at 150% DPI with a visible tab strip
+        // and nonzero margins on every side.
+        let window_width = 3840.0;
+        let window_height = 2080.0;
+        let scaled_margin = Margin::new(60.0, 15.0, 12.0, 9.0);
+        let panel_width = window_width - scaled_margin.left - scaled_margin.right;
+        let panel_height = window_height - scaled_margin.top - scaled_margin.bottom;
+        let grid = manager.current_grid_mut();
+        grid.width = window_width;
+        grid.height = window_height;
+        grid.update_scaled_margin(scaled_margin);
+        manager.current_mut().dimension.update_scale(1.5);
+        manager.current_mut().dimension.rebaseline_font_size(20.0);
+        manager.current_mut().dimension.update_font_size(22.0);
+
+        for tab in 1..12 {
+            // apply_taffy_layout stores the content size and clears the
+            // panel margin. Reproduce that without requiring a GPU.
+            let dimension = &mut manager.current_mut().dimension;
+            dimension.margin = Margin::all(0.0);
+            dimension.update_width(panel_width);
+            dimension.update_height(panel_height);
+            let expected_columns = dimension.columns;
+            let expected_lines = dimension.lines;
+
+            manager.add_context(true, tab);
+
+            let grid = manager.current_grid();
+            assert_eq!(grid.width, window_width, "tab {tab}");
+            assert_eq!(grid.height, window_height, "tab {tab}");
+            let dimension = manager.current().dimension;
+            assert_eq!(dimension.columns, expected_columns, "tab {tab}");
+            assert_eq!(dimension.lines, expected_lines, "tab {tab}");
+            assert_eq!(dimension.dimension.scale, 1.5);
+            assert_eq!(dimension.font_size, 22.0);
+            assert_eq!(dimension.original_font_size, 20.0);
+        }
     }
 
     #[test]
