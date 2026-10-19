@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish the committed packaging/VERSION after all native builds pass'
+        description: 'Publish an existing matching tag after all native builds pass'
         type: boolean
         default: false
 
@@ -39,6 +39,7 @@ jobs:
         id: release
         env:
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
         run: node packaging/release.mjs prepare
       - name: Check release validation
         run: node --test packaging/release.test.mjs

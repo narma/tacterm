@@ -27,6 +27,10 @@ function installation(target) {
 
 async function prepare() {
   if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== tag) throw new Error(`Tag must match committed version: ${tag}`);
+  if (process.env.PUBLISH === 'true') {
+    const tagged = execFileSync('gh', ['api', `repos/${repo}/commits/${tag}`, '--jq', '.sha'], { encoding: 'utf8' }).trim();
+    if (tagged !== sha) throw new Error('Push the matching release tag for this exact source commit before publishing');
+  }
   const output = `version=${version}\ntag=${tag}\nprerelease=${version.includes('-')}\npublish=${process.env.PUBLISH === 'true'}\nmatrix=${JSON.stringify({ include: targets })}\n`;
   if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, output, { flag: 'a' });
   console.log(output);
@@ -121,11 +125,14 @@ async function publish() {
   const existing = spawnSync('gh', ['release', 'view', tag, '--repo', repo, '--json', 'isDraft'], { encoding: 'utf8' });
   if (existing.status === 0 && !JSON.parse(existing.stdout).isDraft) throw new Error('This version is already published. Bump packaging/VERSION instead of replacing its assets.');
   const tagCommit = spawnSync('gh', ['api', `repos/${repo}/commits/${tag}`, '--jq', '.sha'], { encoding: 'utf8' });
-  if (tagCommit.status === 0 && tagCommit.stdout.trim() !== sha) throw new Error('Existing release tag points to another commit');
-  const notes = `# tacterm ${version}\n\nFirst-generation portable tacterm builds based on Rio ${upstreamVersion}.\n\nSource: https://github.com/${repo}/commit/${sha}\nChanges: https://github.com/${repo}/blob/${sha}/FORK_STATUS.md\n\n## Downloads\n\nWindows ZIPs, macOS Tacterm.app ZIPs, and Linux tar.gz archives are attached for x64 and ARM64. Each target is compiled on its native OS/architecture and checked with --version and --help. GUI/GPU sessions are not validated by these smoke checks.\n\n- Windows binaries are **unsigned**.\n- macOS apps have an **ad-hoc signature and are not notarized**. See Apple's per-app opening instructions: https://support.apple.com/102445\n- macOS requires 14+, Linux requires glibc 2.35+ and graphics/font libraries.\n- The packaged command is tacterm, but configuration paths and some internal branding remain Rio-compatible. Settings may be shared with Rio.\n\nEach archive contains its installation README, MIT license, and release-info.json. Check SHA256SUMS before installing. These archives do not modify your existing installation.\n`;
+  if (tagCommit.status !== 0 || tagCommit.stdout.trim() !== sha) throw new Error('A matching release tag must already point to this exact commit');
+  const notes = `# tacterm ${version}\n\nFirst-generation portable tacterm builds based on Rio ${upstreamVersion}.\n\nSource: https://github.com/${repo}/commit/${sha}\nChanges: https://github.com/${repo}/blob/${sha}/FORK_STATUS.md\n\n## Downloads\n\nWindows ZIPs, macOS Tacterm.app ZIPs, and Linux tar.gz archives are attached for x64 and ARM64. Each target is compiled on its native OS/architecture and checked with --version and --help. GUI/GPU sessions are not validated by these smoke checks.\n\n- Windows binaries are **unsigned** and require the Microsoft Visual C++ v14 Redistributable for the matching architecture: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist\n- macOS apps have an **ad-hoc signature and are not notarized**. See Apple's per-app opening instructions: https://support.apple.com/102445\n- macOS requires 14+, Linux requires glibc 2.35+ and graphics/font libraries.\n- The packaged command is tacterm, but configuration paths and some internal branding remain Rio-compatible. Settings may be shared with Rio.\n\nEach archive contains its installation README, MIT license, and release-info.json. Check SHA256SUMS before installing. These archives do not modify your existing installation.\n`;
   const notesPath = resolve('target/release-notes.md');
   await writeFile(notesPath, notes);
-  if (existing.status !== 0) run('gh', ['release', 'create', tag, '--repo', repo, '--target', sha, '--title', `tacterm ${version}`, '--draft', ...(manifest.prerelease ? ['--prerelease'] : []), '--notes-file', notesPath]);
+  // The verified existing tag fixes the source. Leave target_commitish at its
+  // default (main): targeting an older SHA after workflow edits requires a
+  // Workflows-write permission unavailable to GITHUB_TOKEN.
+  if (existing.status !== 0) run('gh', ['release', 'create', tag, '--repo', repo, '--verify-tag', '--title', `tacterm ${version}`, '--draft', ...(manifest.prerelease ? ['--prerelease'] : []), '--notes-file', notesPath]);
   else run('gh', ['release', 'edit', tag, '--repo', repo, '--notes-file', notesPath]);
   run('gh', ['release', 'upload', tag, '--repo', repo, ...manifest.assets.map((asset) => join(assetsDir, asset.name)), join(assetsDir, 'release.json'), join(assetsDir, 'SHA256SUMS'), '--clobber']);
   const uploaded = JSON.parse(execFileSync('gh', ['release', 'view', tag, '--repo', repo, '--json', 'assets'], { encoding: 'utf8' }));

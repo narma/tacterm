@@ -63,9 +63,8 @@ jobs:
           path: target/cargo-timings/
           if-no-files-found: ignore
   msys2-build-test: #cargo test doesn't necessarily build the exec we want
-    # PR-only smoke of the modern default flavor; the full 3-flavor
-    # release-profile matrix runs as a gate in release.yml instead of
-    # on every main push.
+    # PR-only MSYS2 build check. Published tacterm Windows archives use
+    # native MSVC builds from release.yml.
     if: github.event_name == 'pull_request'
     strategy:
       matrix:
@@ -106,8 +105,7 @@ jobs:
       # Debug is not viable on windows-gnu: an unoptimized build of a
       # binary this size exceeds the PE export-ordinal limit at link
       # time. Thin LTO keeps the dead-stripping that makes the link
-      # possible without fat LTO's cost; the release flavor matrix in
-      # release.yml still exercises the full shipped profile.
+      # possible without fat LTO's cost.
       env:
         CARGO_PROFILE_RELEASE_LTO: thin
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 8

@@ -8,8 +8,9 @@ identify the tacterm release. Normal local Rio builds retain their existing vers
 ## Build and publish
 
 1. Integrate and validate changes on `main`; update `FORK_STATUS.md` and this version file.
-2. Push a tag `tacterm-vVERSION` matching the committed version, or manually run the
-   **Tacterm release** workflow on `main` with `publish` enabled.
+2. Push a tag `tacterm-vVERSION` matching the committed version. This automatically
+   runs the **Tacterm release** workflow. A manual run with `publish` enabled also
+   requires that tag to exist and point to the run's exact source commit.
 3. Six native jobs build Windows, macOS, and Linux for x64 and ARM64. They package
    the executable, license, installation notes, terminfo source, and release metadata.
 4. Every packaged executable must pass `--version` and `--help` on its native host.
