@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=TACTERM_RELEASE_VERSION");
     cfg_aliases::cfg_aliases! {
         // rioterm's own `wgpu` feature, or the targets whose
         // target-specific dependency overrides force the feature onto

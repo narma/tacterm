@@ -14,8 +14,8 @@ and release status changes. Proposed changes are not implemented features.
   [`59203ccd5f`](https://github.com/raphamorim/rio/commit/59203ccd5fa1e6b760a738c1ad653bb29f2f3465).
   This was also the fetched `upstream/main` tip at this review.
 - Main development and integration branch: `main` (formerly `my-fork`).
-- Upstream workspace version: `0.5.28`; independent tacterm release versioning
-  has not been established.
+- Upstream workspace version: `0.5.28`. Independent tacterm release versions are
+  committed in [`packaging/VERSION`](packaging/VERSION).
 
 ## Implemented changes
 
@@ -73,15 +73,34 @@ checked against their original trees, excluding only the removed artifacts.
 
 ## Release and compatibility status
 
-- The repository and documentation use the tacterm name. Executable names,
-  application identifiers, package metadata, and configuration paths still use
-  Rio's names. Settings are shared with an existing Rio installation.
-- Independent tacterm release packaging, signing, update channels, and versioning
-  are pending. The inherited release workflow requires adaptation before use.
-- Windows is the local validation platform for this integration. Native macOS and
-  Linux validation is still needed, including the macOS-specific font tests.
+- Release archives package the command as `tacterm` / `tacterm.exe`; macOS uses
+  `Tacterm.app` with its own bundle ID. Source builds still produce `rio`, and
+  configuration paths and some in-app labels retain Rio compatibility. Settings
+  can be shared with an existing Rio installation.
+- Independent releases are built by the [tacterm release workflow](.github/workflows/release.yml)
+  for Windows, macOS, and Linux, each on native x64 and ARM64 runners. The first
+  preview version is `0.1.0-alpha.1`; download availability is determined by the
+  assets actually published on [GitHub Releases](https://github.com/narma/tacterm/releases).
+- Windows binaries are unsigned; macOS apps are ad-hoc signed and not notarized.
+  Native CLI smoke checks cover version and help output. GUI/GPU sessions and
+  older-OS compatibility still require separate validation.
 - Existing personal builds and settings remain in place; this repository
   transition does not build or install a replacement executable.
+
+## Release automation
+
+- [`packaging/`](packaging/README.md) defines release versions, the native build
+  matrix, archive contents, smoke checks, and publishing. Tags use `tacterm-vVERSION`.
+- Windows uses portable ZIP archives, macOS ZIP archives contain `Tacterm.app`,
+  and Linux uses tar.gz archives. Requirements are recorded per artifact.
+- All six targets must pass before a release is published. Checks verify artifact
+  source/version consistency and SHA256 hashes; a draft is published only after
+  all downloads are uploaded. Published versions are not overwritten.
+- Releases include `SHA256SUMS`, a machine-readable `release.json`, installation
+  instructions, and license notices. The site refreshes automatically after publication.
+- Packaging validation tests cover a complete matrix, corrupted archives, mixed
+  source commits, and mismatched release tags. Local release-mode CLI compilation
+  was checked without building or installing a local Windows release executable.
 
 ## Project website
 
@@ -98,7 +117,7 @@ checked against their original trees, excluding only the removed artifacts.
 
 - Evaluate upstream fixes individually, rechecking their current status and
   behavior before integrating them. Proposed changes are not implemented features.
-- Adapt packaging and define configuration migration before changing application
-  identifiers or distributing tacterm alongside Rio.
+- Add trusted signing and macOS notarization, and define a separate configuration
+  migration before promising fully isolated side-by-side settings.
 - Continue incorporating upstream changes and keep upstream PRs scoped to one
   problem each.

@@ -1,0 +1,8 @@
+[
+  {"id":"windows-x64","runner":"windows-2022","target":"x86_64-pc-windows-msvc","platform":"windows","arch":"x64","minimum":"Windows 10 or later","format":"zip","signing":"unsigned"},
+  {"id":"windows-arm64","runner":"windows-11-arm","target":"aarch64-pc-windows-msvc","platform":"windows","arch":"arm64","minimum":"Windows 11 on ARM","format":"zip","signing":"unsigned"},
+  {"id":"macos-arm64","runner":"macos-15","target":"aarch64-apple-darwin","platform":"macos","arch":"arm64","minimum":"macOS 14 or later","format":"zip","signing":"ad-hoc; not notarized"},
+  {"id":"macos-x64","runner":"macos-15-intel","target":"x86_64-apple-darwin","platform":"macos","arch":"x64","minimum":"macOS 14 or later","format":"zip","signing":"ad-hoc; not notarized"},
+  {"id":"linux-x64","runner":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","platform":"linux","arch":"x64","minimum":"glibc 2.35+ (Ubuntu 22.04+) with a Vulkan-capable graphics driver","format":"tar.gz","signing":"SHA256 checksums"},
+  {"id":"linux-arm64","runner":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu","platform":"linux","arch":"arm64","minimum":"glibc 2.35+ (Ubuntu 22.04+) with a Vulkan-capable graphics driver","format":"tar.gz","signing":"SHA256 checksums"}
+]

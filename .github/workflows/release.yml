@@ -1,231 +1,126 @@
-name: Release
+name: Tacterm release
+
 on:
   push:
-    branches: [main]
-    tags:
-      - "v*.*.*"
-    paths:
-      - ".github/workflows/release.yml"
-      - ".goreleaser.yaml"
+    tags: ['tacterm-v*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the committed packaging/VERSION after all native builds pass'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
 concurrency:
-  group: release-${{ github.event_name }}-${{ github.ref_name }}
-  cancel-in-progress: true
+  group: tacterm-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
-      discussions: write
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            cache-subdir: darwin
-          - os: ubuntu-22.04
-            cache-subdir: linux
-            _ids: --id linux-x64-wayland --id linux-x64-x11
-          - os: ubuntu-22.04-arm
-            cache-subdir: linux
-            _ids: --id linux-arm64-wayland --id linux-arm64-x11
-          - os: windows-latest
-            cache-subdir: windows
-      fail-fast: false
+  prepare:
+    if: github.repository == 'narma/tacterm'
+    runs-on: ubuntu-22.04
     outputs:
-      cache-hit: ${{ steps.cache-check.outputs.cache-hit }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-      MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-      MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-      MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.MACOS_NOTARY_KEYCHAIN_PROFILE }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
+      matrix: ${{ steps.release.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Metainfo carries this release
-        # Flathub builds from the tag, so the AppStream release entry
-        # must be in the tagged tree; a post-tag fixup is forever one
-        # release behind (the list once drifted 17 releases).
-        # misc/prepare-release.sh adds it together with the version
-        # bump; this gate makes skipping that impossible.
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          v="${GITHUB_REF_NAME#v}"
-          if ! grep -qF "release version=\"$v\"" misc/com.rioterm.Rio.metainfo.xml; then
-            echo "misc/com.rioterm.Rio.metainfo.xml has no <release> entry for $v." >&2
-            echo "Run misc/prepare-release.sh $v before tagging (it adds the entry" >&2
-            echo "alongside the workspace version bump)." >&2
-            echo "The tag already exists, so after fixing: retag with" >&2
-            echo "  git tag -f v$v && git push -f origin v$v" >&2
-            exit 1
-          fi
-      - uses: actions/cache@v5
+      - uses: actions/setup-node@v6
         with:
-          path: dist/${{ matrix.cache-subdir }}
-          key: goreleaser-${{ matrix.os }}-${{ github.sha }}
-          enableCrossOsArchive: ${{ matrix.os == 'windows-latest' }}
-          lookup-only: true
-          fail-on-cache-miss: false
-        id: cache-check
-      - if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev pkg-config libfontconfig1-dev glslang-tools
-      - if: matrix.os == 'macos-latest'
-        run: rustup target add x86_64-apple-darwin
-      - if: matrix.os == 'windows-latest'
-        run: rustup target add aarch64-pc-windows-msvc
-      - if: matrix.os == 'macos-latest'
-        run: |
-          # create variables
-          CERTIFICATE_PATH=$RUNNER_TEMP/goreleaser.p12
-          KEY_PATH=$RUNNER_TEMP/goreleaser.p8
-          KEYCHAIN_PATH=$RUNNER_TEMP/goreleaser.keychain-db
+          node-version: '24'
+      - name: Validate release source
+        run: git merge-base --is-ancestor HEAD origin/main
+      - name: Prepare native matrix
+        id: release
+        env:
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: node packaging/release.mjs prepare
+      - name: Check release validation
+        run: node --test packaging/release.test.mjs
 
-          # import certificate and key from secrets
-          echo -n "$MACOS_SIGN_P12" | base64 --decode -o $CERTIFICATE_PATH
-          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o $KEY_PATH
-
-          # create temporary keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-
-          # import certificate to keychain
-          security import $CERTIFICATE_PATH -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-          # create notary profile
-          xcrun notarytool store-credentials "$MACOS_NOTARY_KEYCHAIN_PROFILE" \
-            --key "$KEY_PATH" \
-            --key-id "$MACOS_NOTARY_KEY_ID" \
-            --issuer "$MACOS_NOTARY_ISSUER_ID" \
-            --keychain $KEYCHAIN_PATH
-
-          # export the keychain path
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >>$GITHUB_ENV
-
-      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.cache-check.outputs.cache-hit != 'true'
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser-pro
-          version: nightly
-          args: release --clean --split ${{ matrix._ids }} --skip=winget
-      - if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v'))) && steps.cache-check.outputs.cache-hit != 'true'
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser-pro
-          version: nightly
-          args: release --clean --split ${{ matrix._ids }} --nightly --skip=winget
-  # Full gnu-toolchain coverage (LTO release profile on all three MSYS2
-  # flavors) runs here as a release gate instead of on every push.
-  msys2-build:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+  build:
+    needs: prepare
     strategy:
-      matrix:
-        sys: [MINGW64, UCRT64, CLANG64]
-    runs-on: windows-latest
-    timeout-minutes: 60
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      TACTERM_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v6
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - uses: actions/setup-node@v6
         with:
-          msystem: ${{ matrix.sys }}
-          release: false
-          update: false
-          install: base-devel git
-          pacboy: >-
-            rust:p
-            cc:p
-            pkgconf:p
-            cmake:p
-            freetype:p
-            python:p
-            fontconfig:p
-      - name: Build (release)
-        shell: msys2 {0}
-        run: cargo build --release --features wgpu
+          node-version: '24'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -yq
+          sudo apt-get install -yq pkg-config cmake clang libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxcb1-dev libvulkan1 glslang-tools
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: tacterm-release-${{ matrix.id }}
+          cache-all-crates: true
+      - name: Build native release
+        run: cargo +stable build --locked --release -p rioterm --bin rio --features wgpu --target ${{ matrix.target }}
+      - name: Package and smoke-test native executable
+        run: node packaging/release.mjs pack ${{ matrix.id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tacterm-${{ matrix.id }}
+          path: target/release-assets/*
+          if-no-files-found: error
+          retention-days: 7
 
-  release:
-    # skip if cache exists for same commit, since we probably already released
-    if: needs.build.outputs.cache-hit != 'true'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/cache@v5
-        with:
-          key: goreleaser-macos-latest-${{ github.sha }}
-          path: dist/darwin
-          fail-on-cache-miss: true
-      - uses: actions/cache@v5
-        with:
-          key: goreleaser-windows-latest-${{ github.sha }}
-          path: dist/windows
-          fail-on-cache-miss: true
-      - uses: actions/cache@v5
-        with:
-          key: goreleaser-ubuntu-22.04-arm-${{ github.sha }}
-          path: dist/linux
-          fail-on-cache-miss: true
-      - name: workaround to avoid conflicts b/w linux x64/arm64 caches
-        run: |
-          # rename linux to linux-arm64, to avoid cache restore conflicts
-          mv dist/linux dist/linux-arm64
-          # update paths in artifacts.json (dist/linux -> dist/linux-arm64)
-          sed -i 's/dist\/linux/dist\/linux-arm64/g' dist/linux-arm64/artifacts.json
-      - uses: actions/cache@v5
-        with:
-          key: goreleaser-ubuntu-22.04-${{ github.sha }}
-          path: dist/linux
-          fail-on-cache-miss: true
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser-pro
-          version: nightly
-          args: continue --merge
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-      # The release body cannot come from goreleaser's release.header, because
-      # changelog.disable skips the pipe that renders it, leaving the body
-      # empty. Set it here instead.
-      - name: Set release notes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG='${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}'
-          gh release edit "$TAG" --notes '**Full Changelog**: https://rioterm.com/changelog'
-  librio-xcframework:
-    needs: release
-    runs-on: macos-latest
-    timeout-minutes: 30
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
-      - name: Build RioKit.xcframework
-        run: make librio-xcframework
-      - name: Package
-        run: ditto -c -k --keepParent target/librio/RioKit.xcframework RioKit.xcframework.zip
-      - name: Upload to release
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tacterm-*
+          merge-multiple: true
+          path: target/release-assets
+      - name: Verify complete release and checksums
+        run: node packaging/release.mjs assemble
+      - name: Publish all platforms together
+        if: needs.prepare.outputs.publish == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG='${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}'
-          gh release upload "$TAG" \
-            RioKit.xcframework.zip \
-            target/librio/RioKit.xcframework/macos-arm64/librio.a \
-            librio/include/librio.h \
-            --clobber
+          GH_TOKEN: ${{ github.token }}
+        run: node packaging/release.mjs publish
+
+  website:
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Refresh download links from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo narma/tacterm --ref main

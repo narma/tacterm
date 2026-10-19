@@ -37,14 +37,15 @@ WSL, GPU memory, window sizing, and Windows presentation fixes. See
 [FORK_STATUS.md](FORK_STATUS.md) for the implemented changes, evidence, and known
 limits; planned work is listed separately there.
 
-The repository is named tacterm. The executable (`rio` / `rio.exe`), application
-identifiers, and configuration paths still use Rio's names. Existing settings
-continue to apply, and a build from this repository shares the Rio configuration
-location. Separate application packaging and configuration migration are pending.
+Release archives use `tacterm` / `tacterm.exe` and `Tacterm.app`; source builds still
+produce `rio` / `rio.exe`. Configuration paths and some in-app labels retain Rio's
+names, so existing settings continue to apply. Use `RIO_CONFIG_HOME` for isolated
+settings. A separate automatic configuration migration is not provided.
 
 The upstream Rio installation guides, packages, screenshots, and releases describe
-Rio. They are not tacterm distributions. Public tacterm release packaging is not
-ready yet.
+Rio. They are not tacterm distributions. Available tacterm builds, platform
+requirements, and signing details are listed on the [website](https://narma.github.io/tacterm/)
+and [GitHub Releases](https://github.com/narma/tacterm/releases).
 
 ## Building from source
 

@@ -7,11 +7,23 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Parser, Default, Debug)]
-#[clap(author, about, version)]
+#[clap(name = application_name(), author, about, version = application_version())]
 pub struct Cli {
     /// Options which can be passed via IPC.
     #[clap(flatten)]
     pub window_options: WindowOptions,
+}
+
+fn application_name() -> &'static str {
+    if option_env!("TACTERM_RELEASE_VERSION").is_some() {
+        "tacterm"
+    } else {
+        env!("CARGO_PKG_NAME")
+    }
+}
+
+pub(crate) fn application_version() -> &'static str {
+    option_env!("TACTERM_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 #[derive(Serialize, Deserialize, Args, Default, Clone, Debug, PartialEq, Eq)]
