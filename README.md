@@ -1,27 +1,65 @@
-<!-- LOGO -->
-<h1>
-<p align="center">
-  <img src="https://rioterm.com/assets/rio-logo.png" alt="Rio terminal logo" width="128">
-  <br>Rio Terminal
-</h1>
-  <p align="center">
-    Rio is a modern terminal built to run everywhere.
-    <br />
-    <a href="#about">About</a>
-    ·
-    <a href="https://rioterm.com/docs/install">Install</a>
-    ·
-    <a href="https://rioterm.com/docs/config">Config</a>
-    ·
-    <a href="https://rioterm.com/changelog">Changelog</a>
-    ·
-    <a href="https://github.com/sponsors/raphamorim">Sponsor</a>
-  </p>
-</p>
+# tacterm
 
-Documentation: [rioterm.com](https://rioterm.com).
+A terminal emulator based on [Rio](https://github.com/raphamorim/rio), focused on
+performance, simplicity, and practical improvements.
 
-### Tab title fonts
+[Fork status and differences from Rio](FORK_STATUS.md) ·
+[Source](https://github.com/narma/tacterm) ·
+[Upstream documentation](https://rioterm.com/docs/)
+
+## Raison d’être
+
+tacterm exists to develop and ship the improvements we want in the terminal we
+use every day.
+
+Rio provides a strong foundation. This fork gives useful fixes and new ideas an
+independent path to release, including changes that remain pending upstream.
+
+Our priorities are straightforward:
+
+- **Performance:** keep input and rendering responsive, and reduce unnecessary
+  CPU, GPU, and memory use.
+- **Simplicity:** keep everyday use straightforward and the code maintainable.
+- **Features with a performance budget:** evaluate new capabilities for their
+  effect on latency and resource use.
+
+tacterm will continue incorporating upstream Rio changes and contributing fixes
+back where appropriate, while maintaining its own development priorities and
+release schedule.
+
+Built on the work of Raphael Amorim and the Rio contributors.
+
+## Current status
+
+The main development and integration branch is `main`. It combines our tab title,
+WSL, GPU memory, window sizing, and Windows presentation fixes. See
+[FORK_STATUS.md](FORK_STATUS.md) for the implemented changes, evidence, and known
+limits; planned work is listed separately there.
+
+The repository is named tacterm. The executable (`rio` / `rio.exe`), application
+identifiers, and configuration paths still use Rio's names. Existing settings
+continue to apply, and a build from this repository shares the Rio configuration
+location. Separate application packaging and configuration migration are pending.
+
+The upstream Rio installation guides, packages, screenshots, and releases describe
+Rio. They are not tacterm distributions. Public tacterm release packaging is not
+ready yet.
+
+## Building from source
+
+Rio's current minimum supported Rust version is **1.96.1**. With the platform
+dependencies installed, build a development executable from the repository root:
+
+```sh
+cargo build --locked -p rioterm
+```
+
+This produces `target/debug/rio` (or `target/debug/rio.exe` on Windows). Building
+does not install the executable. Consult the
+[upstream documentation](https://rioterm.com/docs/) for general configuration and
+platform guidance; fork-specific behavior is documented here.
+
+## Tab title fonts
 
 Set a separate font for Rio-rendered tab titles in `config.toml`:
 
@@ -37,28 +75,15 @@ and is limited to 8–20 to fit the tab strip. Changes apply when the config is
 reloaded and do not change the terminal font. These fields support platform
 overrides under `[platform.windows.navigation]` (or `linux`/`macos`).
 
-## Supporting the Project
+## Relationship with Rio
 
-If you use and like Rio, please consider sponsoring it: your support helps to cover the fees required to maintain the project and to validate the time spent working on it!
+Rio remains the upstream project. General fixes intended for Rio are developed
+in separate branches so each upstream pull request stays focused. The tacterm
+`main` branch integrates the changes intended for this fork.
 
-[![Sponsor Rio terminal](https://img.shields.io/github/sponsors/raphamorim?label=Sponsor%20Rio&logo=github&style=for-the-badge)](https://github.com/sponsors/raphamorim)
+Rio documentation: [rioterm.com](https://rioterm.com).
+Support upstream development: [Sponsor Raphael Amorim](https://github.com/sponsors/raphamorim).
 
-## Packaging
+## License
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/rio-terminal.svg?columns=3)](https://repology.org/project/rio-terminal/versions)
-
-> Demo with split and CRT on MacOS
-
-![Demo Rio 0.2.0 on MacOS](https://rioterm.com/assets/posts/0.2.0/demo-rio.png)
-
-> Demo with blurred background on Linux
-
-![Demo blurred background](https://rioterm.com/assets/demos/demos-nixos-blur.png)
-
-> Demo of Rio running on a Steam Deck
-
-![Demo of Rio running on a Steam Deck](https://rioterm.com/assets/demos/demo-flatpak-steamdeck.jpg)
-
-## Minimal stable rust version
-
-Rio's MSRV is 1.96.1.
+[MIT](LICENSE). Original authorship and license notices are preserved.
