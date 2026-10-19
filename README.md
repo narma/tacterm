@@ -42,6 +42,9 @@ produce `rio` / `rio.exe`. Configuration paths and some in-app labels retain Rio
 names, so existing settings continue to apply. Use `RIO_CONFIG_HOME` for isolated
 settings. A separate automatic configuration migration is not provided.
 
+The application uses its own lime `t_` icon, adapted from the website, with
+native assets for Windows, macOS, and Linux. See [icon sources](misc/icons/README.md).
+
 The upstream Rio installation guides, packages, screenshots, and releases describe
 Rio. They are not tacterm distributions. Available tacterm builds, platform
 requirements, and signing details are listed on the [website](https://narma.github.io/tacterm/)

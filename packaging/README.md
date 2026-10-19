@@ -33,6 +33,11 @@ signing status. Windows produces portable ZIPs; macOS ZIPs contain `Tacterm.app`
 its own bundle ID; Linux produces tar.gz archives with `bin/tacterm` and an optional
 desktop entry. Configuration paths and some in-app branding still follow Rio.
 
+Application icons come from [`misc/icons/`](../misc/icons/README.md): a multi-size
+ICO embedded in the Windows EXE, an ICNS in the macOS bundle, and an SVG in the
+Linux icon theme. The Linux desktop entry and application ID both use
+`io.github.narma.tacterm` so Wayland can associate the window with its icon.
+
 Windows binaries are unsigned. macOS apps are ad-hoc signed and not notarized;
 Developer ID signing and notarization require separately configured credentials.
 Native CLI smoke checks do not replace GUI/GPU or older-OS compatibility testing.

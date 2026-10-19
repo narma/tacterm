@@ -21,6 +21,7 @@ and release status changes. Proposed changes are not implemented features.
 
 | Area | Changes relative to the baseline | Main commits / evidence |
 | --- | --- | --- |
+| Application icon | Adapt the website's lime `t_` mark for the window icon, Windows EXE resources, macOS app bundles, and Linux desktop integration. Include multiple sizes, Retina representations, and a reproducible vector source. Use a matching Linux app/desktop ID so Wayland can resolve the icon. | [Icon assets and generator](misc/icons/README.md); `frontends/rioterm/build.rs`, `frontends/rioterm/src/router/window.rs`, `packaging/release.mjs` |
 | Tab title rendering | Improve mixed Unicode title shaping, fallback font selection, baseline alignment, vertical centering, and pixel alignment. Cache shaped title runs. Support `tab-font-family` and `tab-font-size`, including platform overrides, without changing terminal fallback fonts. | `b7e076cd80`, `24d69c3767`, `a6bc99ab69`, `966f2870f7`, `a99b322020`, `d0252f0ae8`; settings example in [README](README.md#tab-title-fonts) |
 | macOS title fonts | Check preferred title font coverage with CoreText, including collection fonts and fonts without backing file data. | `7a67599194`; macOS-specific tests require macOS |
 | Configuration reload | Reapply platform overrides when loading an updated configuration, preserving platform-specific settings after reload. | `06b88fb63d` |
@@ -85,6 +86,12 @@ archive and executable matched their recorded SHA256 hashes, and its native
 `--version` check reported `tacterm 0.1.0-alpha.1` on the workstation. These are
 build, packaging, and CLI checks; no graphical sessions were tested for this release.
 
+For the subsequent application-icon update, the generated assets passed a
+regeneration check; the multi-size ICO and 1024 px ICNS decoded successfully.
+A local Windows development build passed, and the icon extracted from its EXE
+matched the new ICO's opaque pixels and transparent background. macOS Dock and
+Linux desktop appearance still require native visual checks.
+
 ## Release and compatibility status
 
 - Release archives package the command as `tacterm` / `tacterm.exe`; macOS uses
@@ -103,6 +110,8 @@ build, packaging, and CLI checks; no graphical sessions were tested for this rel
   older-OS compatibility still require separate validation.
 - Existing personal builds and settings remain in place. Public release builds
   do not install or replace the workstation executable.
+- Subsequent builds use tacterm's own application icon. The published
+  `0.1.0-alpha.1` preview predates this icon change.
 
 ## Release automation
 

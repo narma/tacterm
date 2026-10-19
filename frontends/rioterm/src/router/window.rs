@@ -4,7 +4,7 @@ use rio_window::window::{
     CursorIcon, Fullscreen, Icon, ImePurpose, Window, WindowAttributes,
 };
 
-pub const LOGO_ICON: &[u8; 410598] = include_bytes!("./resources/images/rio-logo.ico");
+pub const LOGO_ICON: &[u8] = include_bytes!("../../../../misc/icons/tacterm-256.png");
 // Terminal W/H constraints
 pub const DEFAULT_MINIMUM_WINDOW_HEIGHT: i32 = 200;
 pub const DEFAULT_MINIMUM_WINDOW_WIDTH: i32 = 300;
@@ -13,7 +13,7 @@ pub const DEFAULT_MINIMUM_WINDOW_WIDTH: i32 = 300;
     any(feature = "wayland", feature = "x11"),
     not(any(target_os = "macos", windows))
 ))]
-pub const APPLICATION_ID: &str = "Rio";
+pub const APPLICATION_ID: &str = "io.github.narma.tacterm";
 
 pub fn create_window_builder(
     title: &str,

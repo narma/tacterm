@@ -43,11 +43,7 @@ fn load_app_icon() {
         return;
     }
     let icon_path = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("src")
-        .join("router")
-        .join("resources")
-        .join("images")
-        .join("rio-logo.ico");
+        .join("../../misc/icons/tacterm.ico");
     println!("cargo:rerun-if-changed={}", icon_path.display());
     let mut res = winres::WindowsResource::new();
     res.set_icon(icon_path.to_str().expect("manifest dir must be utf-8"));
