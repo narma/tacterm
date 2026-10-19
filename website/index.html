@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tacterm — Less overhead. More terminal.</title>
+  <meta name="description" content="A terminal based on Rio, focused on performance, simplicity, and practical improvements. Explore the changes and build from source.">
+  <meta name="source-commit" content="{{COMMIT}}">
+  <meta name="theme-color" content="#f5f4ee">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="tacterm — Less overhead. More terminal.">
+  <meta property="og:description" content="A Rio-based terminal with its own priorities: performance, simplicity, and useful changes.">
+  <meta property="og:url" content="{{URL}}">
+  <link rel="canonical" href="{{URL}}">
+  <link rel="icon" href="{{BASE}}favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="{{BASE}}styles.css">
+  <script src="{{BASE}}site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="wordmark" href="{{BASE}}" aria-label="tacterm home"><span class="brand-mark" aria-hidden="true">t_</span>tacterm</a>
+    <nav aria-label="Main navigation">
+      <a href="#changes">What's different</a>
+      <a href="#status">Status</a>
+      <a class="nav-source" href="https://github.com/narma/tacterm">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> A TERMINAL BASED ON RIO</p>
+        <h1 id="hero-title">Less overhead.<br>More <em>terminal.</em></h1>
+        <p class="hero-description">Built around the things you feel every day: responsive rendering, thoughtful resource use, and a workflow that stays out of your way.</p>
+        <div class="hero-actions">
+          <a class="button button-dark" href="#changes">Explore the changes <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="#build">Build from source <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="hero-note">Open source. MIT licensed. Independently developed.</p>
+      </div>
+      <div class="terminal-composition">
+        <div class="terminal-window" aria-label="Illustrative terminal showing tacterm development priorities">
+          <div class="terminal-titlebar"><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>tacterm — ~/projects</span><span class="window-glyph" aria-hidden="true">⌘</span></div>
+          <div class="terminal-tabs"><span class="terminal-tab active">01 &nbsp; workspace</span><span class="terminal-tab">02 &nbsp; build</span><span class="terminal-tab terminal-tab-last">03 &nbsp; docs</span><span aria-hidden="true">+</span></div>
+          <div class="terminal-content">
+            <p class="terminal-prompt"><span>~/projects/tacterm</span> <b>main</b></p>
+            <p><span class="terminal-green">❯</span> git status --short --branch</p>
+            <p class="terminal-muted">## main...origin/main</p>
+            <div class="terminal-rule"></div>
+            <p class="terminal-muted">A few things worth caring about.</p>
+            <p><span class="terminal-green">✓</span> &nbsp;Performance</p>
+            <p><span class="terminal-green">✓</span> &nbsp;Simplicity</p>
+            <p><span class="terminal-green">✓</span> &nbsp;Features with a performance budget</p>
+            <p class="terminal-bottom"><span class="terminal-green">❯</span> <span class="terminal-cursor" aria-hidden="true"></span></p>
+          </div>
+          <div class="terminal-statusline"><span>tacterm / main</span><span>{{COUNT}} integrated changes</span></div>
+        </div>
+        <div class="terminal-caption"><span class="caption-line" aria-hidden="true"></span> A small illustration of a bigger idea.</div>
+        <span class="terminal-sticker" aria-hidden="true">less, but<br><em>considered.</em></span>
+      </div>
+    </section>
+
+    <section class="principles wrap" aria-label="Project priorities">
+      <p><span>01 /</span> Performance, with purpose.</p>
+      <p><span>02 /</span> Simplicity, in everyday use.</p>
+      <p><span>03 /</span> Useful changes, carefully made.</p>
+    </section>
+
+    <section class="why-section wrap" aria-labelledby="why-title">
+      <p class="eyebrow">WHY ANOTHER FORK?</p>
+      <div><h2 id="why-title">Good foundations.<br>A direction of our own.</h2><p>Rio gives us a strong starting point. tacterm gives useful fixes and new ideas their own path to release, including changes still pending upstream.</p><p>We keep bringing upstream improvements forward and contributing fixes back where appropriate. Our focus stays on a terminal we want to use every day.</p></div>
+    </section>
+
+    <section id="changes" class="changes-section wrap" aria-labelledby="changes-title">
+      <div class="section-heading"><div><p class="eyebrow">THE WORK, SO FAR</p><h2 id="changes-title">Small details.<br>Meaningful differences.</h2></div><a class="text-link" href="{{BASE}}status.html">All {{COUNT}} integrated changes <span aria-hidden="true">↗</span></a></div>
+      <div class="changes-list">{{CHANGES}}</div>
+      <p class="source-note">These changes come directly from our <a href="https://github.com/narma/tacterm/blob/main/FORK_STATUS.md">fork status document</a>.</p>
+    </section>
+
+    <section id="status" class="status-section" aria-labelledby="status-title">
+      <div class="wrap status-grid"><div><p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> IN ACTIVE DEVELOPMENT</p><h2 id="status-title">An honest work<br>in progress.</h2><p>Here's where things stand.<br>Reviewed {{REVIEW_DATE}}.</p><a class="text-link" href="{{BASE}}status.html">Full status &amp; validation <span aria-hidden="true">↗</span></a></div><ul class="status-list">{{STATUS_SUMMARY}}</ul></div>
+    </section>
+
+    <section id="build" class="build-section wrap" aria-labelledby="build-title">
+      <div><p class="eyebrow">GET YOUR HANDS ON IT</p><h2 id="build-title">Start with<br>the source.</h2><p>Public tacterm packages are still in preparation. You can build a development version with Rust {{RUST_VERSION}} or later and the platform dependencies.</p><p>The executable is currently called <code>rio</code> / <code>rio.exe</code> and uses Rio's configuration paths.</p><a class="text-link" href="https://github.com/narma/tacterm#building-from-source">Build instructions <span aria-hidden="true">↗</span></a></div>
+      <div class="build-code"><div class="code-heading"><span>FROM YOUR TERMINAL</span><button type="button" id="copy-command" hidden>Copy commands</button></div><pre><code id="build-command">git clone https://github.com/narma/tacterm.git
+cd tacterm
+cargo build --locked -p rioterm</code></pre><p>Builds into <code>target/debug/</code>. Does not install.</p><span id="copy-result" class="sr-only" role="status" aria-live="polite"></span></div>
+    </section>
+
+    <section class="upstream-section wrap" aria-labelledby="upstream-title"><p class="eyebrow">CREDIT WHERE IT'S DUE</p><h2 id="upstream-title">Built on Rio.<br>Grateful for the groundwork.</h2><p>tacterm builds on the work of Raphael Amorim and the Rio contributors. General configuration guidance is available in the upstream documentation; tacterm's differences are tracked here.</p><div><a class="text-link" href="https://rioterm.com/docs/">Rio documentation ↗</a><a class="text-link" href="https://github.com/raphamorim/rio">Upstream project ↗</a></div></section>
+  </main>
+
+  <footer class="site-footer wrap"><a class="wordmark" href="{{BASE}}">tacterm<span class="footer-period">.</span></a><span>A terminal with its priorities in order.</span><div><a href="https://github.com/narma/tacterm/blob/main/LICENSE">MIT license</a><a href="https://github.com/narma/tacterm">Source ↗</a></div></footer>
+</body>
+</html>

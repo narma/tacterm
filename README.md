@@ -3,6 +3,7 @@
 A terminal emulator based on [Rio](https://github.com/raphamorim/rio), focused on
 performance, simplicity, and practical improvements.
 
+[Website](https://narma.github.io/tacterm/) ·
 [Fork status and differences from Rio](FORK_STATUS.md) ·
 [Source](https://github.com/narma/tacterm) ·
 [Upstream documentation](https://rioterm.com/docs/)

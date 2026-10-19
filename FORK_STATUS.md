@@ -83,6 +83,17 @@ checked against their original trees, excluding only the removed artifacts.
 - Existing personal builds and settings remain in place; this repository
   transition does not build or install a replacement executable.
 
+## Project website
+
+- [tacterm website](https://narma.github.io/tacterm/): an independent project
+  homepage with source in [`website/`](website/README.md) on `main`.
+- Implemented changes, review date, and release/platform status are generated
+  from this document. The complete status is also published as `status.html`.
+- A GitHub Actions workflow builds and publishes relevant changes to GitHub
+  Pages. It replaces the inherited Rio site previously served from `gh-pages`.
+- The site uses static HTML, CSS, and a small optional clipboard script, without
+  third-party fonts, analytics, or runtime content dependencies.
+
 ## Next work
 
 - Evaluate upstream fixes individually, rechecking their current status and
