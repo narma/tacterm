@@ -99,6 +99,7 @@ code{font-family:var(--mono);font-size:.87em;overflow-wrap:anywhere}
 .download-card>p{font-size:11px;color:var(--muted);line-height:1.8;margin:15px 0 0}
 .download-footer{display:flex;align-items:center;flex-wrap:wrap;gap:15px 25px;margin-top:22px}
 .download-footer>span{font-size:10px;color:var(--muted)}
+@media(max-width:420px){.site-header nav a:first-child{display:none}.site-header nav a{white-space:nowrap}}
 @media(max-width:780px){.downloads-section{padding-top:55px}.download-grid{grid-template-columns:1fr}.download-card{padding:22px}.download-card>p{font-size:12px}.download-link{font-size:14px}.download-link>span:last-child{font-size:11px}}
 .build-section>div>p:not(.eyebrow){font-size:13px;line-height:1.85;color:var(--muted);max-width:390px}
 .build-code{background:#fffef9;border:1px solid var(--line);border-radius:5px;overflow:hidden}

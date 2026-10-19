@@ -36,7 +36,7 @@ function downloadSection() {
     const preferredArch = platform === 'macos' ? 'arm64' : 'x64';
     const links = release.assets.filter((asset) => asset.platform === platform).sort((a, b) => Number(b.arch === preferredArch) - Number(a.arch === preferredArch)).map((asset) => {
       const arch = platform === 'macos' ? (asset.arch === 'arm64' ? 'Apple Silicon' : 'Intel') : (asset.arch === 'x64' ? 'x64' : 'ARM64');
-      return `<a class="download-link" href="${escape(asset.url)}"><span>${arch}</span><span>${(asset.bytes / 1048576).toFixed(1)} MB &nbsp; ↓</span></a>`;
+      return `<a class="download-link" aria-label="Download ${label} ${arch}" href="${escape(asset.url)}"><span>${arch}</span><span>${(asset.bytes / 1048576).toFixed(1)} MB &nbsp; ↓</span></a>`;
     }).join('');
     return `<article class="download-card"><h3>${label}</h3>${links}<p>${notes[platform]}</p>${platform === 'windows' ? '<a class="text-link" href="https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist">Microsoft runtime downloads ↗</a>' : ''}</article>`;
   }).join('');
