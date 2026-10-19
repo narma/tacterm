@@ -40,7 +40,7 @@ function inline(value) {
   for (const match of value.matchAll(pattern)) {
     html += escape(value.slice(position, match.index));
     if (match[1]) html += `<code>${escape(match[1])}</code>`;
-    else if (match[2]) html += `<a href="${escape(sourceLink(match[3]))}">${escape(match[2])}</a>`;
+    else if (match[2]) html += `<a href="${escape(sourceLink(match[3]))}">${inline(match[2])}</a>`;
     else html += `<strong>${escape(match[4])}</strong>`;
     position = match.index + match[0].length;
   }
