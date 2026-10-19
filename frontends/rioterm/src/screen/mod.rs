@@ -3875,7 +3875,11 @@ impl Screen<'_> {
         }
     }
 
-    pub(crate) fn render(&mut self) -> Option<crate::context::renderable::WindowUpdate> {
+    pub(crate) fn render(
+        &mut self,
+        force_present: bool,
+    ) -> (Option<crate::context::renderable::WindowUpdate>, bool) {
+        let mut presented = false;
         self.update_close_button_hover(self.mouse.x, self.mouse.y);
         if self.renderer.is_window_focused {
             self.context_manager.clear_current_bell();
@@ -3983,7 +3987,10 @@ impl Screen<'_> {
         // it earlier would fail to schedule the continuation frame,
         // freezing the trail mid-flight until unrelated damage arrives.
         let has_animation = self.renderer.needs_redraw();
-        let should_present = any_panel_dirty || has_animation;
+        // Presentation cadence is separate from terminal damage. A
+        // fullscreen/maximized VRR window must submit even idle frames, using the
+        // resident grids without marking rows dirty or reshaping text.
+        let should_present = force_present || any_panel_dirty || has_animation;
 
         // Phase 2.2/2.3: per-panel CellBg + CellText emission with
         // per-row dirty gating. Iterates every panel in the active
@@ -4638,7 +4645,8 @@ impl Screen<'_> {
                 // A dropped frame (no drawable, e.g. right after wake)
                 // already consumed this frame's damage; without a retry
                 // the content is lost until unrelated PTY traffic.
-                if self.sugarloaf.take_frame_dropped() {
+                presented = !self.sugarloaf.take_frame_dropped();
+                if !presented {
                     self.mark_dirty();
                     self.context_manager.request_render();
                 }
@@ -4707,7 +4715,7 @@ impl Screen<'_> {
                 .blink_cursor(self.renderer.config_blinking_interval);
         }
 
-        window_update
+        (window_update, presented)
     }
 
     /// Update IME cursor position based on terminal cursor position

@@ -2237,13 +2237,20 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
             WindowEvent::RedrawRequested => {
                 route.begin_render();
+                let continuous_present = route
+                    .window
+                    .needs_continuous_present(self.config.renderer.use_cpu);
+                let mut frame_presented = false;
 
                 match route.path {
                     RoutePath::Welcome => {
                         route.window.screen.render_welcome();
                     }
                     RoutePath::Terminal => {
-                        if let Some(window_update) = route.window.screen.render() {
+                        let (window_update, presented) =
+                            route.window.screen.render(continuous_present);
+                        frame_presented = presented;
+                        if let Some(window_update) = window_update {
                             use crate::context::renderable::{
                                 BackgroundState, WindowUpdate,
                             };
@@ -2302,25 +2309,29 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // println!("Time elapsed in render() is: {:?}", duration);
                 // }
 
-                // Game mode = unlocked framerate, so keep the event loop
-                // spinning. Every other case is vsync-paced: a
-                // `request_redraw` tells winit to deliver
-                // `RedrawRequested` at the next platform vsync, and the
-                // OS parks the thread until that event arrives. Busy-
-                // polling between vsyncs here would burn CPU without
-                // delivering more frames.
+                // Continuous Windows presentation is paced by the FIFO
+                // swapchain, not by an additional DwmFlush tick. Fall back
+                // to display-paced requests after a failed acquisition so
+                // an unavailable surface cannot spin the event loop.
                 if self.config.renderer.strategy.is_game() {
                     route.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Poll);
                 } else {
-                    if route
-                        .window
-                        .screen
-                        .ctx()
-                        .current()
-                        .renderable_content
-                        .pending_update
-                        .is_dirty()
+                    if continuous_present && frame_presented {
+                        #[cfg(target_os = "windows")]
+                        {
+                            use rio_window::platform::windows::WindowExtWindows;
+                            route.window.winit_window.request_redraw_swapchain_paced();
+                        }
+                    } else if continuous_present
+                        || route
+                            .window
+                            .screen
+                            .ctx()
+                            .current()
+                            .renderable_content
+                            .pending_update
+                            .is_dirty()
                     {
                         route.request_redraw();
                     }

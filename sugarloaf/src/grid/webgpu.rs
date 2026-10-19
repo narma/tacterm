@@ -1035,8 +1035,13 @@ mod gpu_tests {
             values
         };
 
-        for resize in [false, true] {
-            if resize {
+        // Repeat both the initial and resized frame without row writes.
+        // Fullscreen VRR presents must retain the uploaded panel contents
+        // even when the terminal has no damage.
+        for (resize, repeat) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            if resize && !repeat {
                 left.resize(4, 2);
                 // A background panel's glyph cache may grow independently.
                 // Rendering must refresh the grayscale binding too.
@@ -1060,25 +1065,31 @@ mod gpu_tests {
             }
             // Force foreground capacity growth with degenerate, invisible
             // glyph quads. Exercise both shared pipelines and all bind groups.
-            left.write_row(
-                0,
-                &vec![
-                    CellBg {
-                        rgba: [255, 0, 0, 255]
-                    };
-                    left.cols as usize
-                ],
-                &vec![CellText::default(); 9],
-            );
-            right.write_row(
-                0,
-                &[CellBg {
-                    rgba: [0, 0, 255, 255],
-                }; 3],
-                &[],
-            );
+            if !repeat {
+                left.write_row(
+                    0,
+                    &vec![
+                        CellBg {
+                            rgba: [255, 0, 0, 255]
+                        };
+                        left.cols as usize
+                    ],
+                    &vec![CellText::default(); 9],
+                );
+                right.write_row(
+                    0,
+                    &[CellBg {
+                        rgba: [0, 0, 255, 255],
+                    }; 3],
+                    &[],
+                );
+            } else {
+                assert!(!left.bg_dirty && !left.fg_dirty);
+                assert!(!right.bg_dirty && !right.fg_dirty);
+            }
             let mut left_uniforms = uniforms(&left);
-            left_uniforms.cursor_pos = [0, 0];
+            // Cursor uniforms still update on frames that reuse cell buffers.
+            left_uniforms.cursor_pos = [u32::from(repeat), 0];
             left_uniforms.cursor_bg_color = [0., 1., 0., 1.];
             let right_uniforms = uniforms(&right);
             let mut encoder = device.create_command_encoder(&Default::default());
@@ -1133,7 +1144,11 @@ mod gpu_tests {
             receive.recv().unwrap().unwrap();
             assert_eq!(
                 &readback.slice(..).get_mapped_range().unwrap()[..12],
-                &[0, 255, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255]
+                if repeat {
+                    &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255]
+                } else {
+                    &[0, 255, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255]
+                }
             );
             readback.unmap();
             assert!(Arc::ptr_eq(&left.pipelines, &right.pipelines));

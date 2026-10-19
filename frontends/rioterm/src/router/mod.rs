@@ -765,6 +765,20 @@ pub struct RouteWindow<'a> {
 }
 
 impl<'a> RouteWindow<'a> {
+    /// Keep a steady stream of presents for a focused Windows fullscreen
+    /// or maximized GPU window. A borderless maximized window can also
+    /// engage VRR; event-only presents then follow PTY bursts and cursor
+    /// blinks, which can cause near-black flicker on OLED.
+    pub fn needs_continuous_present(&self, use_cpu: bool) -> bool {
+        cfg!(target_os = "windows")
+            && !use_cpu
+            && self.is_focused
+            && !self.is_occluded
+            && self.winit_window.is_visible() != Some(false)
+            && (self.winit_window.fullscreen().is_some()
+                || self.winit_window.is_maximized())
+    }
+
     pub fn configure_window(&mut self, config: &rio_backend::config::Config) {
         configure_window(&self.winit_window, config);
     }
@@ -775,14 +789,15 @@ impl<'a> RouteWindow<'a> {
             return None;
         }
 
-        // On macOS, CVDisplayLink handles VSync synchronization automatically,
-        // so we don't need software-based frame timing calculations
-        #[cfg(target_os = "macos")]
+        // CVDisplayLink (macOS) and the DwmFlush worker (Windows)
+        // already pace request_redraw. A second timer can miss the next
+        // display tick and cut the presentation rate in half.
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
             None
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let now = Instant::now();
             let elapsed = now.duration_since(self.render_timestamp);

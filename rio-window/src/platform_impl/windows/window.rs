@@ -20,8 +20,8 @@ use windows_sys::Win32::Graphics::Dwm::{
 };
 use windows_sys::Win32::Graphics::Gdi::{
     ChangeDisplaySettingsExW, ClientToScreen, CreateRectRgn, DeleteObject, InvalidateRgn,
-    CDS_FULLSCREEN, DISP_CHANGE_BADFLAGS, DISP_CHANGE_BADMODE, DISP_CHANGE_BADPARAM,
-    DISP_CHANGE_FAILED, DISP_CHANGE_SUCCESSFUL,
+    RedrawWindow, CDS_FULLSCREEN, DISP_CHANGE_BADFLAGS, DISP_CHANGE_BADMODE,
+    DISP_CHANGE_BADPARAM, DISP_CHANGE_FAILED, DISP_CHANGE_SUCCESSFUL, RDW_INTERNALPAINT,
 };
 use windows_sys::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL,
@@ -203,8 +203,22 @@ impl Window {
         // we just flag the window as dirty here. Mirrors macOS's
         // `needs_redraw` flag consumed by the CVDisplayLink
         // callback.
-        self.window_state.lock().unwrap().redraw_requested = true;
+        // Do not also set WindowState::redraw_requested: WM_PAINT
+        // consumes that flag to queue an immediate internal paint,
+        // bypassing the worker when redraw is requested from a frame.
         self.redraw_pending.store(true, Ordering::Release);
+    }
+
+    #[inline]
+    pub fn request_redraw_swapchain_paced(&self) {
+        // During WM_PAINT this flag causes a new internal paint to be
+        // queued after DefWindowProc validates the current paint. Outside
+        // a paint callback, RedrawWindow queues it directly. Neither path
+        // dispatches synchronously or adds a second clock before FIFO.
+        self.window_state.lock().unwrap().redraw_requested = true;
+        unsafe {
+            RedrawWindow(self.hwnd(), ptr::null(), ptr::null_mut(), RDW_INTERNALPAINT);
+        }
     }
 
     #[inline]

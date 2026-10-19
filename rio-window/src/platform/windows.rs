@@ -317,6 +317,12 @@ pub trait WindowExtWindows {
     /// Not supported on Windows 7 and earlier.
     fn set_cloaked(&self, cloaked: bool);
 
+    /// Queue a repaint without waiting for the DWM composition clock.
+    ///
+    /// The caller must pace frames through its swapchain and use the normal
+    /// `request_redraw` path when presentation fails, to avoid a busy loop.
+    fn request_redraw_swapchain_paced(&self);
+
     /// Get the raw window handle for this [`Window`] without checking for thread affinity.
     ///
     /// Window handles in Win32 have a property called "thread affinity" that ties them to their
@@ -434,6 +440,11 @@ impl WindowExtWindows for Window {
     #[inline]
     fn set_cloaked(&self, cloaked: bool) {
         self.window.set_cloaked(cloaked)
+    }
+
+    #[inline]
+    fn request_redraw_swapchain_paced(&self) {
+        self.window.request_redraw_swapchain_paced()
     }
 
     unsafe fn window_handle_any_thread(
