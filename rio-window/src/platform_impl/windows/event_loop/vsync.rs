@@ -218,6 +218,43 @@ fn query_dwm_interval() -> Option<Duration> {
 
 #[inline]
 fn ticks_to_duration(counts: u64, ticks_per_second: u64) -> Duration {
-    let ticks_per_microsecond = (ticks_per_second / 1_000_000).max(1);
-    Duration::from_micros(counts / ticks_per_microsecond)
+    // The fallback call uses a refresh-rate fraction (e.g. 1 / 240),
+    // not a high-frequency QPC clock. Dividing the frequency first
+    // turns that fraction into 1 us instead of a 4.167 ms frame.
+    // Keep the full ratio, with u128 intermediate arithmetic so large
+    // QPC counts cannot overflow when converting to nanoseconds.
+    Duration::new(
+        counts / ticks_per_second,
+        (((counts % ticks_per_second) as u128 * 1_000_000_000) / ticks_per_second as u128)
+            as u32,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ticks_to_duration;
+    use std::time::Duration;
+
+    #[test]
+    fn refresh_rate_fractions_preserve_frame_intervals() {
+        assert_eq!(ticks_to_duration(1, 60), Duration::from_nanos(16_666_666));
+        assert_eq!(ticks_to_duration(1, 240), Duration::from_nanos(4_166_666));
+        assert_eq!(
+            ticks_to_duration(1001, 60_000),
+            Duration::from_nanos(16_683_333)
+        );
+    }
+
+    #[test]
+    fn qpc_conversion_preserves_fractional_microseconds_and_large_counts() {
+        assert_eq!(
+            ticks_to_duration(41_667, 10_000_000),
+            Duration::from_nanos(4_166_700)
+        );
+        assert_eq!(ticks_to_duration(5, 3_579_545), Duration::from_nanos(1_396));
+        assert_eq!(
+            ticks_to_duration(u64::MAX, u64::MAX),
+            Duration::from_secs(1)
+        );
+    }
 }
