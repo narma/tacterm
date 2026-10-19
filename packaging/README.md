@@ -38,6 +38,11 @@ Native CLI smoke checks do not replace GUI/GPU or older-OS compatibility testing
 Hosted builds use thin LTO, no debug information, and two compiler jobs to fit runner
 memory. Local Windows release builds continue to use the ignored memory-aware helper.
 
+Windows builds depend on the Microsoft Visual C++ v14 Redistributable for their
+architecture. [Official Microsoft downloads](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+are linked from the website. No third-party runtime installer is bundled or run
+automatically. Linux graphics/font runtime dependencies are listed in each archive.
+
 ## Checks
 
 ```sh

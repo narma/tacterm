@@ -82,6 +82,8 @@ checked against their original trees, excluding only the removed artifacts.
   preview version is `0.1.0-alpha.1`; download availability is determined by the
   assets actually published on [GitHub Releases](https://github.com/narma/tacterm/releases).
 - Windows binaries are unsigned; macOS apps are ad-hoc signed and not notarized.
+  Windows requires the matching Microsoft Visual C++ v14 Runtime; Linux requires
+  its graphics and font libraries in addition to glibc 2.35+.
   Native CLI smoke checks cover version and help output. GUI/GPU sessions and
   older-OS compatibility still require separate validation.
 - Existing personal builds and settings remain in place; this repository
