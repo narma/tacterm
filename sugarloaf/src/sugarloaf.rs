@@ -1142,6 +1142,7 @@ impl Sugarloaf<'_> {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             _ => {
+                self.renderer.frame_dropped = true;
                 self.reset();
                 return;
             }
