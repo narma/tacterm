@@ -71,6 +71,20 @@ The subsequent history cleanup removed local benchmark artifacts without
 changing application code or GPU regression tests. The retained commits were
 checked against their original trees, excluding only the removed artifacts.
 
+The [native project CI](https://github.com/narma/tacterm/actions/runs/39333317119)
+also passed formatting, Clippy, and the regular test suite on Windows, macOS,
+and Linux for release source commit `e04e22900c`. The separate MSYS2 check is
+PR-only and was skipped. Packaging validation (4 tests) and website download
+metadata validation (5 tests) passed as well.
+
+The [first release build](https://github.com/narma/tacterm/actions/runs/39333414258)
+compiled and packaged all six native OS/architecture targets from `e04e22900c`.
+Every packaged executable passed `--version` and `--help`; Linux dependency
+resolution and macOS ad-hoc signatures also passed. The downloaded Windows x64
+archive and executable matched their recorded SHA256 hashes, and its native
+`--version` check reported `tacterm 0.1.0-alpha.1` on the workstation. These are
+build, packaging, and CLI checks; no graphical sessions were tested for this release.
+
 ## Release and compatibility status
 
 - Release archives package the command as `tacterm` / `tacterm.exe`; macOS uses
@@ -78,21 +92,24 @@ checked against their original trees, excluding only the removed artifacts.
   configuration paths and some in-app labels retain Rio compatibility. Settings
   can be shared with an existing Rio installation.
 - Independent releases are built by the [tacterm release workflow](.github/workflows/release.yml)
-  for Windows, macOS, and Linux, each on native x64 and ARM64 runners. The first
-  preview version is `0.1.0-alpha.1`; download availability is determined by the
-  assets actually published on [GitHub Releases](https://github.com/narma/tacterm/releases).
+  for Windows, macOS, and Linux, each on native x64 and ARM64 runners.
+  [Preview `0.1.0-alpha.1`](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0-alpha.1)
+  is published with all six archives and SHA256 checksums. The website offers
+  downloads validated against the actual GitHub release assets.
 - Windows binaries are unsigned; macOS apps are ad-hoc signed and not notarized.
   Windows requires the matching Microsoft Visual C++ v14 Runtime; Linux requires
   its graphics and font libraries in addition to glibc 2.35+.
   Native CLI smoke checks cover version and help output. GUI/GPU sessions and
   older-OS compatibility still require separate validation.
-- Existing personal builds and settings remain in place; this repository
-  transition does not build or install a replacement executable.
+- Existing personal builds and settings remain in place. Public release builds
+  do not install or replace the workstation executable.
 
 ## Release automation
 
 - [`packaging/`](packaging/README.md) defines release versions, the native build
   matrix, archive contents, smoke checks, and publishing. Tags use `tacterm-vVERSION`.
+  Publishing requires an existing tag pointing to the exact build commit; pushing
+  that tag starts the complete workflow automatically.
 - Windows uses portable ZIP archives, macOS ZIP archives contain `Tacterm.app`,
   and Linux uses tar.gz archives. Requirements are recorded per artifact.
 - All six targets must pass before a release is published. Checks verify artifact
@@ -100,6 +117,9 @@ checked against their original trees, excluding only the removed artifacts.
   all downloads are uploaded. Published versions are not overwritten.
 - Releases include `SHA256SUMS`, a machine-readable `release.json`, installation
   instructions, and license notices. The site refreshes automatically after publication.
+- The first preview's six public download URLs returned HTTP 200 with matching
+  file sizes. All archive hashes agreed between GitHub asset digests, the release
+  manifest, and `SHA256SUMS`; the manifest's own checksum also passed.
 - Packaging validation tests cover a complete matrix, corrupted archives, mixed
   source commits, and mismatched release tags. Local release-mode CLI compilation
   was checked without building or installing a local Windows release executable.
