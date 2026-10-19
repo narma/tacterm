@@ -32,9 +32,19 @@ duplicating their current status in the homepage. Update highlight selection in
 `build.mjs` if an area is renamed. The renderer supports the headings, paragraphs,
 lists, tables, links, bold text, and inline code used by the status document.
 
+The published build uses `--fetch-release` to read the newest complete tacterm
+release (including previews) from GitHub. Its six download links and checksums are
+validated against `release.json` and the real attached assets. Downloads are only
+shown after publication, never guessed from a version number. API or manifest
+errors fail the build rather than replacing a working site with broken links.
+For offline previews, supply `--release-file path/to/release.json`. Without either
+option the local build shows the not-yet-published state.
+
 ## Publishing
 
 `.github/workflows/pages.yml` builds and deploys on relevant pushes to `main`,
 and can also be run manually. Pull requests build without deploying. GitHub Pages
 must use **GitHub Actions** as its publishing source; the legacy `gh-pages` branch
 is no longer used. The workflow derives the public URL from GitHub Pages metadata.
+The release workflow explicitly dispatches this workflow after publishing, so
+download links refresh even when a release is created with the standard GitHub token.

@@ -7,12 +7,14 @@ on:
       - 'website/**'
       - 'FORK_STATUS.md'
       - 'Cargo.toml'
+      - 'packaging/VERSION'
       - '.github/workflows/pages.yml'
   pull_request:
     paths:
       - 'website/**'
       - 'FORK_STATUS.md'
       - 'Cargo.toml'
+      - 'packaging/VERSION'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -42,7 +44,10 @@ jobs:
       - name: Build static website
         env:
           SITE_URL: ${{ steps.pages.outputs.base_url }}
-        run: node website/build.mjs
+          GH_TOKEN: ${{ github.token }}
+        run: node website/build.mjs --fetch-release
+      - name: Check download metadata validation
+        run: node --test website/releases.test.mjs
       - name: Upload website
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4

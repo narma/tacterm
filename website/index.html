@@ -22,7 +22,7 @@
     <a class="wordmark" href="{{BASE}}" aria-label="tacterm home"><span class="brand-mark" aria-hidden="true">t_</span>tacterm</a>
     <nav aria-label="Main navigation">
       <a href="#changes">What's different</a>
-      <a href="#status">Status</a>
+      <a href="#downloads">Downloads</a>
       <a class="nav-source" href="https://github.com/narma/tacterm">GitHub <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
@@ -34,8 +34,7 @@
         <h1 id="hero-title">Less overhead.<br>More <em>terminal.</em></h1>
         <p class="hero-description">Built around the things you feel every day: responsive rendering, thoughtful resource use, and a workflow that stays out of your way.</p>
         <div class="hero-actions">
-          <a class="button button-dark" href="#changes">Explore the changes <span aria-hidden="true">↗</span></a>
-          <a class="text-link" href="#build">Build from source <span aria-hidden="true">↓</span></a>
+          {{HERO_ACTIONS}}
         </div>
         <p class="hero-note">Open source. MIT licensed. Independently developed.</p>
       </div>
@@ -82,8 +81,10 @@
       <div class="wrap status-grid"><div><p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> IN ACTIVE DEVELOPMENT</p><h2 id="status-title">An honest work<br>in progress.</h2><p>Here's where things stand.<br>Reviewed {{REVIEW_DATE}}.</p><a class="text-link" href="{{BASE}}status.html">Full status &amp; validation <span aria-hidden="true">↗</span></a></div><ul class="status-list">{{STATUS_SUMMARY}}</ul></div>
     </section>
 
+    {{DOWNLOADS}}
+
     <section id="build" class="build-section wrap" aria-labelledby="build-title">
-      <div><p class="eyebrow">GET YOUR HANDS ON IT</p><h2 id="build-title">Start with<br>the source.</h2><p>Public tacterm packages are still in preparation. You can build a development version with Rust {{RUST_VERSION}} or later and the platform dependencies.</p><p>The executable is currently called <code>rio</code> / <code>rio.exe</code> and uses Rio's configuration paths.</p><a class="text-link" href="https://github.com/narma/tacterm#building-from-source">Build instructions <span aria-hidden="true">↗</span></a></div>
+      <div><p class="eyebrow">GET YOUR HANDS ON IT</p><h2 id="build-title">Start with<br>the source.</h2><p>{{BUILD_INTRO}} with Rust {{RUST_VERSION}} or later and the platform dependencies.</p><p>A source build produces <code>rio</code> / <code>rio.exe</code> and uses Rio's configuration paths.</p><a class="text-link" href="https://github.com/narma/tacterm#building-from-source">Build instructions <span aria-hidden="true">↗</span></a></div>
       <div class="build-code"><div class="code-heading"><span>FROM YOUR TERMINAL</span><button type="button" id="copy-command" hidden>Copy commands</button></div><pre><code id="build-command">git clone https://github.com/narma/tacterm.git
 cd tacterm
 cargo build --locked -p rioterm</code></pre><p>Builds into <code>target/debug/</code>. Does not install.</p><span id="copy-result" class="sr-only" role="status" aria-live="polite"></span></div>

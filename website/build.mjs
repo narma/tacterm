@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadRelease } from './releases.mjs';
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(sourceDir, '..');
@@ -25,6 +26,22 @@ const cargo = await readFile(join(root, 'Cargo.toml'), 'utf8');
 const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
+const release = await loadRelease({ file: option('--release-file', null), online: args.includes('--fetch-release') });
+
+function downloadSection() {
+  if (!release) return `<section id="downloads" class="downloads-section wrap" aria-labelledby="downloads-title"><p class="eyebrow">RELEASE BUILDS</p><h2 id="downloads-title">The first preview<br>is on its way.</h2><p class="download-intro">Ready-made downloads appear here after every native build and release check passes. In the meantime, you can <a href="#build">build from source</a>.</p><a class="text-link" href="${repo}/releases">Follow GitHub Releases ↗</a></section>`;
+  const labels = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+  const notes = { windows: 'Portable ZIP. Unsigned binaries; Windows may show an unknown-publisher warning.', macos: 'Tacterm.app · macOS 14+. Ad-hoc signed; not notarized. Gatekeeper may block the first launch.', linux: 'tar.gz · glibc 2.35+ (Ubuntu 22.04+). Requires font libraries and a Vulkan-capable driver.' };
+  const cards = Object.entries(labels).map(([platform, label]) => {
+    const preferredArch = platform === 'macos' ? 'arm64' : 'x64';
+    const links = release.assets.filter((asset) => asset.platform === platform).sort((a, b) => Number(b.arch === preferredArch) - Number(a.arch === preferredArch)).map((asset) => {
+      const arch = platform === 'macos' ? (asset.arch === 'arm64' ? 'Apple Silicon' : 'Intel') : (asset.arch === 'x64' ? 'x64' : 'ARM64');
+      return `<a class="download-link" href="${escape(asset.url)}"><span>${arch}</span><span>${(asset.bytes / 1048576).toFixed(1)} MB &nbsp; ↓</span></a>`;
+    }).join('');
+    return `<article class="download-card"><h3>${label}</h3>${links}<p>${notes[platform]}</p></article>`;
+  }).join('');
+  return `<section id="downloads" class="downloads-section wrap" aria-labelledby="downloads-title"><div class="section-heading"><div><p class="eyebrow">${release.prerelease ? 'PREVIEW RELEASE' : 'RELEASE BUILDS'} / ${escape(release.version)}</p><h2 id="downloads-title">Ready when<br>you are.</h2></div><a class="text-link" href="${escape(release.releaseUrl)}">Release notes &amp; installation ↗</a></div><p class="download-intro">Choose your system and processor. These early builds share Rio's settings paths; every archive includes installation notes.</p><div class="download-grid">${cards}</div><div class="download-footer"><a class="text-link" href="${escape(release.checksumUrl)}">SHA256 checksums ↗</a><a class="text-link" href="${escape(release.releaseUrl)}">All assets on GitHub ↗</a><span>Native builds and CLI smoke checks. GUI/GPU validation is separate.</span></div></section>`;
+}
 
 function sourceLink(value) {
   if (value.startsWith('#')) return value;
@@ -123,6 +140,11 @@ const replacements = {
   CHANGES: changesHtml,
   STATUS_SUMMARY: releaseItems.slice(0, 3).map((item) => `<li>${inline(item)}</li>`).join('\n'),
   COMMIT: escape(process.env.GITHUB_SHA || 'local-preview'),
+  DOWNLOADS: downloadSection(),
+  HERO_ACTIONS: release
+    ? '<a class="button button-dark" href="#downloads">Download preview <span aria-hidden="true">↓</span></a><a class="text-link" href="#changes">Explore the changes <span aria-hidden="true">↗</span></a>'
+    : '<a class="button button-dark" href="#changes">Explore the changes <span aria-hidden="true">↗</span></a><a class="text-link" href="#build">Build from source <span aria-hidden="true">↓</span></a>',
+  BUILD_INTRO: release ? 'Prefer to build it yourself? The complete source is available. Build a development version' : 'Public tacterm packages are still in preparation. You can build a development version',
 };
 function fill(template, extra = {}) {
   const values = { ...replacements, ...extra };
@@ -142,4 +164,4 @@ for (const asset of ['styles.css', 'site.js', 'favicon.svg']) await copyFile(joi
 await writeFile(join(outDir, '.nojekyll'), '');
 await writeFile(join(outDir, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${siteUrl.href}sitemap.xml\n`);
 await writeFile(join(outDir, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${escape(siteUrl.href)}</loc></url><url><loc>${escape(siteUrl.href)}status.html</loc></url></urlset>\n`);
-console.log(`Built tacterm: ${outDir}\nURL: ${siteUrl.href}\nStatus: ${rows.length} changes, reviewed ${reviewDate}`);
+console.log(`Built tacterm: ${outDir}\nURL: ${siteUrl.href}\nStatus: ${rows.length} changes, reviewed ${reviewDate}\nDownloads: ${release?.version || 'no published release yet'}`);

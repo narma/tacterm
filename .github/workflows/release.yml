@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: tacterm-release-${{ github.ref }}
+  group: tacterm-release
   cancel-in-progress: false
 
 jobs:
@@ -44,6 +44,7 @@ jobs:
         run: node --test packaging/release.test.mjs
 
   build:
+    name: ${{ matrix.id }}
     needs: prepare
     strategy:
       fail-fast: false
