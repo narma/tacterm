@@ -1,7 +1,7 @@
 # tacterm website
 
 The website is a small static site published at <https://tacterm.dev/>.
-Source lives here on `main`. It uses Node.js built-ins, without package installation,
+Source lives here on `main`. It builds with Bun using Node-compatible built-ins, without package installation,
 third-party fonts, analytics, or runtime requests for content.
 
 The responsive layout supports light, dark, and system themes on every page.
@@ -26,22 +26,22 @@ Capture helpers and the isolated demo configuration live locally under
 Run download metadata and theme behavior checks with:
 
 ```sh
-node --test website/releases.test.mjs website/theme.test.mjs
+bun test ./website/releases.test.mjs ./website/theme.test.mjs
 ```
 
 ## Build
 
-From the repository root, with Node.js 24 or later:
+From the repository root, with Bun 1.4.3 (also pinned in the publishing workflow):
 
 ```sh
-node website/build.mjs
+bun website/build.mjs
 ```
 
 Generated files go to ignored `target/site/`. Do not commit generated output.
 To use another URL or destination:
 
 ```sh
-node website/build.mjs --url https://example.com/tacterm/ --out-dir target/site
+bun website/build.mjs --url https://example.com/tacterm/ --out-dir target/site
 ```
 
 Serve the generated directory under the URL's path when previewing locally, so
@@ -51,12 +51,12 @@ asset and navigation paths are checked in the same layout as GitHub Pages.
 
 `FORK_STATUS.md` is the source for the implemented changes, review date, and
 release/platform status. The build validates the required sections, renders four
-selected highlights on the homepage, and generates the complete `status.html`
+selected highlights on the homepage, and generates `status.html` with user-facing changes and compatibility information
 with section navigation. Homepage highlights use concise editorial summaries
 in `build.mjs`, each checked against an implemented area in the source document;
 review those summaries alongside changes to the underlying feature.
 Rust requirements come from `Cargo.toml`. Update the source documents instead of
-duplicating version or validation details in the homepage. The page leads with
+duplicating version or compatibility details in the homepage. The page leads with
 the product, then practical differences, downloads, compatibility questions,
 source builds, and the relationship with Rio. Update highlight selection in
 `build.mjs` if an area is renamed. The renderer supports the headings, paragraphs,
@@ -73,7 +73,9 @@ option the local build links to GitHub Releases without guessing available downl
 ## Publishing
 
 `.github/workflows/pages.yml` builds and deploys on relevant pushes to `main`,
-and can also be run manually. Pull requests build without deploying. GitHub Pages
+and can also be run manually. Pull requests build without deploying. Builds use
+`oven-sh/setup-bun` to install the pinned Bun version; no dependency installation
+is needed. GitHub Pages
 must use **GitHub Actions** as its publishing source; the legacy `gh-pages` branch
 is no longer used. The workflow derives the public URL from GitHub Pages metadata.
 The release workflow explicitly dispatches this workflow after publishing, so

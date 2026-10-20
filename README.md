@@ -34,8 +34,7 @@ Built on the work of Raphael Amorim and the Rio contributors.
 
 The main development and integration branch is `main`. It combines our tab title,
 WSL, GPU memory, window sizing, and Windows presentation fixes. See
-[FORK_STATUS.md](FORK_STATUS.md) for the implemented changes, evidence, and known
-limits; planned work is listed separately there.
+[FORK_STATUS.md](FORK_STATUS.md) for the implemented changes, compatibility requirements, and known limits.
 
 Release archives use `tacterm` / `tacterm.exe` and `Tacterm.app`; source builds also
 produce `tacterm` / `tacterm.exe`. Some in-app labels retain Rio's names.

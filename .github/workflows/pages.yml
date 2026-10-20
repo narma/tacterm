@@ -34,9 +34,9 @@ jobs:
       pages: read
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: '24'
+          bun-version: '1.4.3'
       - name: Read GitHub Pages configuration
         if: github.event_name != 'pull_request' && github.repository == 'narma/tacterm'
         id: pages
@@ -45,9 +45,9 @@ jobs:
         env:
           SITE_URL: ${{ steps.pages.outputs.base_url }}
           GH_TOKEN: ${{ github.token }}
-        run: node website/build.mjs --fetch-release
+        run: bun website/build.mjs --fetch-release
       - name: Check download metadata and theme behavior
-        run: node --test website/releases.test.mjs website/theme.test.mjs
+        run: bun test ./website/releases.test.mjs ./website/theme.test.mjs
       - name: Upload website
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v4
