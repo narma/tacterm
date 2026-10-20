@@ -45,8 +45,13 @@ Linux icon theme. The Linux desktop entry and application ID both use
 Windows binaries are unsigned. macOS apps are ad-hoc signed and not notarized;
 Developer ID signing and notarization require separately configured credentials.
 Native CLI smoke checks do not replace GUI/GPU or older-OS compatibility testing.
-Hosted builds use thin LTO, no debug information, and two compiler jobs to fit runner
-memory. Local Windows release builds continue to use the ignored memory-aware helper.
+Hosted builds use thin LTO, no debug information, and two compiler jobs.
+The manual `cold_memory_trial` option tests four jobs on every native target,
+skips Rust cache restore/save, and uploads host memory samples. It permits a
+feature branch and rejects publication. Each build uploads a
+`release-timings-TARGET` artifact for comparing compilation times. Packaging output
+is removed after upload so it does not inflate the Rust cache. Local Windows
+release builds continue to use the ignored memory-aware helper.
 
 Windows builds depend on the Microsoft Visual C++ v14 Redistributable for their
 architecture. [Official Microsoft downloads](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
