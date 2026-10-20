@@ -38,7 +38,7 @@ jobs:
         with:
           node-version: '24'
       - name: Validate release source
-        if: ${{ !inputs.cold_memory_trial || inputs.publish }}
+        if: ${{ github.event_name == 'push' || inputs.publish }}
         run: git merge-base --is-ancestor HEAD origin/main
       - name: Reject publication during memory trial
         if: ${{ inputs.cold_memory_trial && inputs.publish }}
@@ -58,13 +58,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
+    # Keep the target's native runner for packaging; compile macOS x64 on ARM.
+    runs-on: ${{ matrix.id == 'macos-x64' && 'macos-15' || matrix.runner }}
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: '0'
-      # Windows and ARM benefit from four jobs; keep x64 Linux/macOS at two.
-      CARGO_BUILD_JOBS: ${{ (inputs.cold_memory_trial || matrix.platform == 'windows' || matrix.arch == 'arm64') && '4' || '2' }}
+      # Only Linux x64 uses two jobs; both macOS targets compile on ARM.
+      CARGO_BUILD_JOBS: ${{ (inputs.cold_memory_trial || matrix.id != 'linux-x64') && '4' || '2' }}
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8'
@@ -81,7 +82,7 @@ jobs:
           sudo apt-get update -yq
           sudo apt-get install -yq pkg-config cmake clang libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxcb1-dev libvulkan1 glslang-tools
       - name: Install Rust
-        run: rustup toolchain install stable --profile minimal
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         if: ${{ !inputs.cold_memory_trial }}
         with:
@@ -89,7 +90,7 @@ jobs:
           # Keep only registry crates used by this workspace.
           cache-all-crates: false
           cache-bin: false
-      - name: Build native release
+      - name: Build release executable
         if: ${{ !inputs.cold_memory_trial }}
         run: cargo +stable build --locked --release -p rioterm --bin tacterm --features wgpu --target ${{ matrix.target }} --timings
       - name: Cold build with host memory sampling
@@ -165,7 +166,25 @@ jobs:
       - name: Remove packaging output restored from the Rust cache
         run: node packaging/release.mjs clean
       - name: Package and smoke-test native executable
+        if: matrix.id != 'macos-x64'
         run: node packaging/release.mjs pack ${{ matrix.id }}
+      - name: Stage macOS x64 executable for native validation
+        if: matrix.id == 'macos-x64'
+        run: |
+          test "$(lipo -archs target/x86_64-apple-darwin/release/tacterm)" = x86_64
+          mkdir -p "$RUNNER_TEMP/macos-x64-transfer"
+          cd target/x86_64-apple-darwin/release
+          shasum -a 256 tacterm > "$RUNNER_TEMP/macos-x64-transfer/SHA256SUMS"
+          tar -czf "$RUNNER_TEMP/macos-x64-transfer/executable.tar.gz" tacterm
+      - name: Upload macOS x64 executable for native validation
+        if: matrix.id == 'macos-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-macos-x64
+          path: ${{ runner.temp }}/macos-x64-transfer/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
       - name: Compile Windows installer from the portable executable
         if: runner.os == 'Windows'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
@@ -182,6 +201,7 @@ jobs:
           ./packaging/windows/test-installer.ps1 -Version '${{ needs.prepare.outputs.version }}' -Arch '${{ matrix.arch }}'
           node packaging/release.mjs setup ${{ matrix.id }}
       - uses: actions/upload-artifact@v4
+        if: matrix.id != 'macos-x64'
         with:
           name: tacterm-${{ matrix.id }}${{ runner.os == 'Windows' && '-portable' || '' }}
           path: |
@@ -215,8 +235,42 @@ jobs:
       - name: Keep packaging output out of the Rust cache
         run: node packaging/release.mjs clean
 
+  package-macos-x64:
+    name: macos-x64 native validation and packaging
+    needs: build
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-binary-macos-x64
+          path: target/macos-x64-transfer
+      - name: Verify transferred executable
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p target/x86_64-apple-darwin/release
+          tar -xzf target/macos-x64-transfer/executable.tar.gz -C target/x86_64-apple-darwin/release
+          cd target/x86_64-apple-darwin/release
+          shasum -a 256 -c ../../macos-x64-transfer/SHA256SUMS
+          test "$(lipo -archs tacterm)" = x86_64
+      - name: Package and smoke-test native executable
+        run: node packaging/release.mjs pack macos-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tacterm-macos-x64
+          path: |
+            target/release-assets/*.zip
+            target/release-assets/build-*.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, package-macos-x64]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:

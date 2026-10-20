@@ -14,8 +14,10 @@ and retain the Rio base version unless this variable is supplied.
 2. Push a tag `tacterm-vVERSION` matching the committed version. This automatically
    runs the **Tacterm release** workflow. A manual run with `publish` enabled also
    requires that tag to exist and point to the run's exact source commit.
-3. Six native jobs build Windows, macOS, and Linux for x64 and ARM64. They package
-   the executable, license, installation notes, terminfo source, and release metadata.
+3. Six build jobs compile Windows, macOS, and Linux for x64 and ARM64. macOS x64
+   compiles on an ARM runner, then transfers its executable with a SHA256 checksum
+   to Intel for native validation and packaging. Packages include the executable,
+   license, installation notes, terminfo source, and release metadata.
 4. Every packaged executable must pass `--version` and `--help` on its native host.
    Linux dependencies and macOS ad-hoc signatures are checked as part of packaging.
 5. After every job succeeds, the publisher verifies all source/version IDs and
@@ -24,7 +26,9 @@ and retain the Rio base version unless this variable is supplied.
    use a new version rather than replacing an existing published release.
 6. The publisher dispatches the website workflow on `main` to refresh download links.
 
-Leaving `publish` disabled performs native builds and assembly without publishing.
+Leaving `publish` disabled allows branch validation, including native checks and
+complete release assembly, without publishing. Publication requires a commit
+integrated into `main`.
 The workflow uses only the normal GitHub token; it does not publish crates, package
 registry entries, upstream releases, or overwrite a local installation. The upstream
 `.goreleaser.yaml` is not used by this release process.
@@ -45,9 +49,10 @@ Linux icon theme. The Linux desktop entry and application ID both use
 Windows binaries are unsigned. macOS apps are ad-hoc signed and not notarized;
 Developer ID signing and notarization require separately configured credentials.
 Native CLI smoke checks do not replace GUI/GPU or older-OS compatibility testing.
-Hosted builds use thin LTO and no debug information. Windows and ARM builds use
-four compiler jobs; Linux x64 and macOS Intel use two.
-The manual `cold_memory_trial` option tests four jobs on every native target,
+Hosted builds use thin LTO and no debug information. All builds use four compiler
+jobs except Linux x64, which uses two. Both macOS targets compile on ARM; macOS
+x64 validation, ad-hoc signing, and packaging run on Intel without recompilation.
+The manual `cold_memory_trial` option tests four jobs on every build target,
 skips Rust cache restore/save, and uploads host memory samples. It permits a
 feature branch and rejects publication. Each build uploads a
 `release-timings-TARGET` artifact for comparing compilation times. Packaging output
