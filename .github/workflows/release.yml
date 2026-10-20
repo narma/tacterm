@@ -86,7 +86,10 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
         with:
           path: packaging/windows/tacterm.iss
-          options: /DReleaseVersion=${{ needs.prepare.outputs.version }} /DReleaseArch=${{ matrix.arch }}
+          # v1.2.9 reads each line as one compiler argument.
+          options: |
+            /DReleaseVersion=${{ needs.prepare.outputs.version }}
+            /DReleaseArch=${{ matrix.arch }}
           install_latest: 'true'
       - name: Smoke-test Windows installer and record its checksum
         if: runner.os == 'Windows'
