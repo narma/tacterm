@@ -21,10 +21,12 @@ and release status changes. Proposed changes are not implemented features.
 
 | Area | Changes relative to the baseline | Main commits / evidence |
 | --- | --- | --- |
+| Executable name | Cargo builds `tacterm` / `tacterm.exe` directly. Release packaging, local build helper, desktop launchers and CLI naming use the new binary name. The Cargo package remains `rioterm`. | `frontends/rioterm/Cargo.toml`, `frontends/rioterm/src/cli.rs`, `packaging/release.mjs` |
 | Application icon | Adapt the website's lime `t_` mark for the window icon, Windows EXE resources, macOS app bundles, and Linux desktop integration. Include multiple sizes, Retina representations, and a reproducible vector source. Use a matching Linux app/desktop ID so Wayland can resolve the icon. | [Icon assets and generator](misc/icons/README.md); `frontends/rioterm/build.rs`, `frontends/rioterm/src/router/window.rs`, `packaging/release.mjs` |
 | Tab title rendering | Improve mixed Unicode title shaping, fallback font selection, baseline alignment, vertical centering, and pixel alignment. Cache shaped title runs. Support `tab-font-family` and `tab-font-size`, including platform overrides, without changing terminal fallback fonts. | `b7e076cd80`, `24d69c3767`, `a6bc99ab69`, `966f2870f7`, `a99b322020`, `d0252f0ae8`; settings example in [README](README.md#tab-title-fonts) |
 | macOS title fonts | Check preferred title font coverage with CoreText, including collection fonts and fonts without backing file data. | `7a67599194`; macOS-specific tests require macOS |
 | Configuration reload | Reapply platform overrides when loading an updated configuration, preserving platform-specific settings after reload. | `06b88fb63d` |
+| Independent configuration | Use a dedicated `tacterm` directory and `TACTERM_CONFIG_HOME`. Import Rio settings and assets once when the destination is absent, excluding logs and installer backups; preserve the source and never fall back to it. | `rio-backend/src/config/migration.rs`; configuration details in [README](README.md) |
 | WSL working directories | Open a new tab in the focused tab's directory when inheritance is enabled. Automatically load the WSL zsh working-directory integration; restore the shell directory at prompts and ignore subshell reports. | `126454e0ce`, `fc05f6d77f`, `4ec4cc646e` |
 | New tab dimensions | Preserve full window dimensions and the original font size when creating tabs, avoiding repeated subtraction of panel padding and progressive loss of terminal area. | `8dc3e939bd`; context regression test covers repeated tab creation at 150% scale |
 | GPU allocation policy | Reduce GPU memory reservations and defer unused atlas storage. | `ebf9ddf67b` |
@@ -50,6 +52,26 @@ Workstation measurement reports and ad hoc benchmark helpers are kept locally,
 outside the published repository. Regression tests remain part of the source.
 
 ## Validation
+
+The configuration import and executable rename passed Windows validation on
+**2026-10-20**: 221 backend tests (including 5 import regressions), the renamed
+application's compile check, 4 packaging tests, 9 website tests, formatting and
+whitespace checks. The local memory-aware release build and installation passed
+version and SHA256 checks. The user confirmed familiar appearance after first
+launch; the imported configuration matched Rio's original, which was unchanged.
+Both pinned launchers were updated to the new executable with their arguments
+preserved. Native macOS and Linux import behavior still needs validation.
+
+The website build passed with live release metadata. Source-build naming and
+configuration compatibility text are updated, and the internal screenshot-format
+maintenance section has been removed from the public status page.
+
+Release 0.1.0 is prepared with six native OS/architecture builds, checksum
+verification and feature-focused release notes. Publication is pending the
+release workflow. Measurements summarized in those notes compare individual
+optimization stages on one Windows workstation; they are not cumulative or a
+single final-release-versus-upstream benchmark. Detailed local reports and
+helpers remain excluded from the repository.
 
 Integration checks on **2026-10-20**, on Windows with Rust stable 1.99.0, passed
 against the combined code through merge commit `4500440f8d`:
@@ -112,9 +134,10 @@ section navigation. Builds without release metadata link to GitHub Releases
 instead of incorrectly implying that no release exists.
 
 - Release archives package the command as `tacterm` / `tacterm.exe`; macOS uses
-  `Tacterm.app` with its own bundle ID. Source builds still produce `rio`, and
-  configuration paths and some in-app labels retain Rio compatibility. Settings
-  can be shared with an existing Rio installation.
+  `Tacterm.app` with its own bundle ID. Source builds now produce `tacterm`, and
+  some in-app labels retain Rio compatibility. Current source builds use an
+  independent configuration directory with one-time Rio import. Published
+  `0.1.0-alpha.1` binaries still share Rio configuration paths.
 - Independent releases are built by the [tacterm release workflow](.github/workflows/release.yml)
   for Windows, macOS, and Linux, each on native x64 and ARM64 runners.
   [Preview `0.1.0-alpha.1`](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0-alpha.1)
@@ -166,14 +189,7 @@ instead of incorrectly implying that no release exists.
 
 - Evaluate upstream fixes individually, rechecking their current status and
   behavior before integrating them. Proposed changes are not implemented features.
-- Add trusted signing and macOS notarization, and define a separate configuration
-  migration before promising fully isolated side-by-side settings.
+- Add trusted signing and macOS notarization, and validate configuration import
+  on macOS and Linux before the next release.
 - Continue incorporating upstream changes and keep upstream PRs scoped to one
   problem each.
-
-## Website screenshot format
-
-On 2026-10-20, replaced the incorrectly named JPEG hero image with a fresh
-1444 × 1157 native Windows PNG capture. The website build now checks the PNG
-signature and IHDR header, derives image dimensions, and versions the image URL
-by content hash. The image was visually checked and the nine website tests passed.

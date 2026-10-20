@@ -1,5 +1,6 @@
 pub mod bell;
 pub mod bindings;
+mod migration;
 // `colors` and `ConfigError` moved to the `rio-vt` core crate; re-export
 // so `rio_backend::config::{colors, ConfigError}` keep resolving.
 pub use rio_vt::config::{colors, ConfigError};
@@ -205,39 +206,30 @@ pub struct CursorConfig {
     pub blinking_interval: u64,
 }
 
-#[cfg(target_os = "macos")]
-#[inline]
+/// The active configuration always belongs to tacterm, never to Rio.
 pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
+    std::env::var_os("TACTERM_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or(dirs::home_dir().unwrap().join(".config").join("rio"))
+        .unwrap_or_else(|| default_config_dir("tacterm"))
 }
 
-#[cfg(target_os = "windows")]
-#[inline]
-pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
+fn default_config_dir(name: &str) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    let base = dirs::home_dir().unwrap().join("AppData").join("Local");
+    #[cfg(target_os = "macos")]
+    let base = dirs::home_dir().unwrap().join(".config");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or(
-            dirs::home_dir()
-                .unwrap()
-                .join("AppData")
-                .join("Local")
-                .join("rio"),
-        )
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"));
+    base.join(name)
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-#[inline]
-pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
+fn prepare_config_dir() -> std::io::Result<()> {
+    let source = std::env::var_os("RIO_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or(
-            std::env::var("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or(dirs::home_dir().unwrap().join(".config"))
-                .join("rio"),
-        )
+        .unwrap_or_else(|| default_config_dir("rio"));
+    migration::prepare(&source, &config_dir_path())
 }
 
 #[inline]
@@ -252,6 +244,12 @@ pub fn config_file_content() -> String {
 
 #[inline]
 pub fn create_config_file(path: Option<PathBuf>) {
+    if path.is_none() {
+        if let Err(error) = prepare_config_dir() {
+            tracing::error!("could not initialize tacterm configuration: {error}");
+            return;
+        }
+    }
     let default_file_path = path.clone().unwrap_or(config_file_path());
     if default_file_path.exists() {
         tracing::info!(
@@ -382,6 +380,10 @@ impl Config {
     }
 
     pub fn load() -> Self {
+        if let Err(error) = prepare_config_dir() {
+            warn!("could not initialize tacterm configuration: {error}");
+            return Self::default();
+        }
         let config_path = config_dir_path();
         let path = config_file_path();
         if path.exists() {
@@ -416,6 +418,11 @@ impl Config {
     }
 
     pub fn try_load() -> Result<Self, ConfigError> {
+        prepare_config_dir().map_err(|error| {
+            ConfigError::ErrLoadingConfig(format!(
+                "could not initialize tacterm configuration: {error}"
+            ))
+        })?;
         let path = config_file_path();
         if path.exists() {
             match std::fs::read_to_string(path) {

@@ -78,7 +78,7 @@ jobs:
           key: tacterm-release-${{ matrix.id }}
           cache-all-crates: true
       - name: Build native release
-        run: cargo +stable build --locked --release -p rioterm --bin rio --features wgpu --target ${{ matrix.target }}
+        run: cargo +stable build --locked --release -p rioterm --bin tacterm --features wgpu --target ${{ matrix.target }}
       - name: Package and smoke-test native executable
         run: node packaging/release.mjs pack ${{ matrix.id }}
       - uses: actions/upload-artifact@v4

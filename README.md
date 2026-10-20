@@ -37,10 +37,27 @@ WSL, GPU memory, window sizing, and Windows presentation fixes. See
 [FORK_STATUS.md](FORK_STATUS.md) for the implemented changes, evidence, and known
 limits; planned work is listed separately there.
 
-Release archives use `tacterm` / `tacterm.exe` and `Tacterm.app`; source builds still
-produce `rio` / `rio.exe`. Configuration paths and some in-app labels retain Rio's
-names, so existing settings continue to apply. Use `RIO_CONFIG_HOME` for isolated
-settings. A separate automatic configuration migration is not provided.
+Release archives use `tacterm` / `tacterm.exe` and `Tacterm.app`; source builds also
+produce `tacterm` / `tacterm.exe`. Some in-app labels retain Rio's names.
+
+Current source builds use their own configuration directory:
+
+- Windows: `%USERPROFILE%\AppData\Local\tacterm`
+- macOS: `~/.config/tacterm`
+- Linux: `$XDG_CONFIG_HOME/tacterm`, or `~/.config/tacterm`
+
+Set `TACTERM_CONFIG_HOME` to override this directory. When it does not yet exist,
+tacterm copies the Rio configuration directory (including themes and other assets,
+excluding `log` and `install-backups`) into it. `RIO_CONFIG_HOME` overrides the import source only.
+Rio's files remain unchanged; subsequent loads, edits and reloads use tacterm's
+copy. An existing tacterm directory, even empty, disables import. If Rio has no
+directory, tacterm initializes an empty one and uses defaults.
+
+A failed copy leaves the destination unpublished and reports a configuration
+error; it never falls back to reading Rio directly. Linked or special files
+require manual migration. Absolute paths inside settings are copied verbatim.
+The already published `0.1.0-alpha.1` release still shares Rio's configuration
+directory; the isolation above applies to builds containing this change.
 
 The application uses its own lime `t_` icon, adapted from the website, with
 native assets for Windows, macOS, and Linux. See [icon sources](misc/icons/README.md).
@@ -59,7 +76,7 @@ dependencies installed, build a development executable from the repository root:
 cargo build --locked -p rioterm
 ```
 
-This produces `target/debug/rio` (or `target/debug/rio.exe` on Windows). Building
+This produces `target/debug/tacterm` (or `target/debug/tacterm.exe` on Windows). Building
 does not install the executable. Consult the
 [upstream documentation](https://rioterm.com/docs/) for general configuration and
 platform guidance; fork-specific behavior is documented here.

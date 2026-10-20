@@ -91,6 +91,9 @@ fn setup_logs_by_filter_level(
     log_level: &str,
     log_file: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // A failed import must remain retryable: logging must not create the
+    // destination directory that marks configuration initialization complete.
+    let log_file = log_file && config_dir_path().is_dir();
     let mut filter_level = LevelFilter::from_str(log_level).unwrap_or(LevelFilter::OFF);
 
     if let Ok(data) = std::env::var(LOG_LEVEL_ENV) {

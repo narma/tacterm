@@ -3,11 +3,14 @@
 The independent release version is committed in `packaging/VERSION`. Rust workspace
 crate versions continue to describe the Rio base. CI injects `TACTERM_RELEASE_VERSION`
 into the application so the packaged `tacterm --version` and terminal version variable
-identify the tacterm release. Normal local Rio builds retain their existing version.
+identify the tacterm release. Local source builds use the tacterm executable name
+and retain the Rio base version unless this variable is supplied.
 
 ## Build and publish
 
-1. Integrate and validate changes on `main`; update `FORK_STATUS.md` and this version file.
+1. Integrate and validate changes on `main`; update `FORK_STATUS.md`, this version
+   file, and `packaging/notes/VERSION.md` with the release's user-facing highlights.
+   The publisher uses those highlights before installation and download details.
 2. Push a tag `tacterm-vVERSION` matching the committed version. This automatically
    runs the **Tacterm release** workflow. A manual run with `publish` enabled also
    requires that tag to exist and point to the run's exact source commit.
@@ -31,7 +34,8 @@ registry entries, upstream releases, or overwrite a local installation. The upst
 See `targets.json` for runner images, architectures, minimum OS requirements, and
 signing status. Windows produces portable ZIPs; macOS ZIPs contain `Tacterm.app` with
 its own bundle ID; Linux produces tar.gz archives with `bin/tacterm` and an optional
-desktop entry. Configuration paths and some in-app branding still follow Rio.
+desktop entry. Configuration uses a separate tacterm directory with one-time
+Rio import; some in-app branding still follows Rio.
 
 Application icons come from [`misc/icons/`](../misc/icons/README.md): a multi-size
 ICO embedded in the Windows EXE, an ICNS in the macOS bundle, and an SVG in the

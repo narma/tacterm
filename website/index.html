@@ -73,7 +73,7 @@
     </section>
 
     <section id="build" class="build-section wrap" aria-labelledby="build-title">
-      <div><p class="eyebrow">FOR DEVELOPERS</p><h2 id="build-title">Build it.<br>Make it yours.</h2><p>To try the development branch or contribute a fix, build from source with Rust {{RUST_VERSION}} or later and the dependencies for your platform.</p><p>Local builds keep the executable name <code>rio</code> / <code>rio.exe</code>. Downloaded releases use <code>tacterm</code> / <code>tacterm.exe</code>.</p><a class="text-link" href="https://github.com/narma/tacterm#building-from-source">Build instructions <span aria-hidden="true">↗</span></a></div>
+      <div><p class="eyebrow">FOR DEVELOPERS</p><h2 id="build-title">Build it.<br>Make it yours.</h2><p>To try the development branch or contribute a fix, build from source with Rust {{RUST_VERSION}} or later and the dependencies for your platform.</p><p>Source builds and downloaded releases use <code>tacterm</code> / <code>tacterm.exe</code>. Current source builds keep their settings in a separate <code>tacterm</code> directory and import Rio settings on first launch.</p><a class="text-link" href="https://github.com/narma/tacterm#building-from-source">Build instructions <span aria-hidden="true">↗</span></a></div>
       <div class="build-code"><div class="code-heading"><span>FROM YOUR TERMINAL</span><button type="button" id="copy-command" hidden>Copy commands</button></div><pre><code id="build-command">git clone https://github.com/narma/tacterm.git
 cd tacterm
 cargo build --locked -p rioterm</code></pre><p>Builds into <code>target/debug/</code>. Does not install.</p><span id="copy-result" class="sr-only" role="status" aria-live="polite"></span></div>

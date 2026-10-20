@@ -9,7 +9,7 @@
   <key>CFBundleDisplayName</key>
   <string>Rio</string>
   <key>CFBundleExecutable</key>
-  <string>rio</string>
+  <string>tacterm</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

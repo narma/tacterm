@@ -15,11 +15,7 @@ pub struct Cli {
 }
 
 fn application_name() -> &'static str {
-    if option_env!("TACTERM_RELEASE_VERSION").is_some() {
-        "tacterm"
-    } else {
-        env!("CARGO_PKG_NAME")
-    }
+    "tacterm"
 }
 
 pub(crate) fn application_version() -> &'static str {

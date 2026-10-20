@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-TryExec=rio
-Exec=rio
+TryExec=tacterm
+Exec=tacterm
 Icon=rio
 Terminal=false
 Categories=System;TerminalEmulator;
@@ -14,4 +14,4 @@ Actions=New;
 
 [Desktop Action New]
 Name=New Terminal
-Exec=rio
+Exec=tacterm

@@ -1,5 +1,5 @@
 BUILD_MISC_DIR = misc
-TARGET = rio
+TARGET = tacterm
 TARGET_DIR = target/release
 TARGET_DIR_DEBIAN = target/debian
 TARGET_DIR_OSX = $(TARGET_DIR)/osx
@@ -137,10 +137,10 @@ bump-brew:
 # TODO: Move to bin path
 release-x11:
 	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=x11
-	target/release/rio
+	target/release/tacterm
 release-wayland:
 	RUSTFLAGS='-C link-arg=-s' cargo build --release --no-default-features --features=wayland
-	target/release/rio
+	target/release/tacterm
 
 # Debian
 # cargo install cargo-deb
