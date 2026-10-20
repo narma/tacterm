@@ -94,6 +94,23 @@ Linux desktop appearance still require native visual checks.
 
 ## Release and compatibility status
 
+The website presentation was refreshed on 2026-10-20 with larger typography,
+responsive change and download cards, and light/dark/system theme controls on
+the home, status, and error pages. Theme preference persists across navigation;
+system mode follows live OS changes. Website metadata and theme behavior checks
+passed (9 tests). Browser checks covered light/dark appearance, a 390 px mobile
+layout, six release download links, and theme persistence after reload and
+navigation. This is a website-only change; it does not change native builds.
+The homepage's illustrative terminal was replaced with an actual Windows
+development-build screenshot showing three native tabs and a real theme-test
+run. The caption identifies the custom theme and development build, and the
+image can be opened at full size.
+The homepage now explains practical differences before downloads, with
+compatibility questions and source-build instructions following them. Concise
+editorial summaries link to this complete status document, which includes
+section navigation. Builds without release metadata link to GitHub Releases
+instead of incorrectly implying that no release exists.
+
 - Release archives package the command as `tacterm` / `tacterm.exe`; macOS uses
   `Tacterm.app` with its own bundle ID. Source builds still produce `rio`, and
   configuration paths and some in-app labels retain Rio compatibility. Settings
@@ -137,11 +154,12 @@ Linux desktop appearance still require native visual checks.
 
 - [tacterm website](https://narma.github.io/tacterm/): an independent project
   homepage with source in [`website/`](website/README.md) on `main`.
-- Implemented changes, review date, and release/platform status are generated
-  from this document. The complete status is also published as `status.html`.
+- The change count and review date are generated from this document. Homepage
+  summaries explain selected implemented changes; the complete technical status
+  is published as `status.html`. Download metadata comes from the release manifest.
 - A GitHub Actions workflow builds and publishes relevant changes to GitHub
   Pages. It replaces the inherited Rio site previously served from `gh-pages`.
-- The site uses static HTML, CSS, and a small optional clipboard script, without
+- The site uses static HTML, CSS, and small theme and clipboard scripts, without
   third-party fonts, analytics, or runtime content dependencies.
 
 ## Next work

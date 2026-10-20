@@ -4,6 +4,27 @@ The website is a small static site published at <https://narma.github.io/tacterm
 Source lives here on `main`. It uses Node.js built-ins, without package installation,
 third-party fonts, analytics, or runtime requests for content.
 
+The responsive layout supports light, dark, and system themes on every page.
+The default follows the operating system, including changes while the page is
+open. An explicit choice is saved locally and shared across tabs. The early
+`theme.js` script applies it before styles load; CSS also follows the system
+when JavaScript is disabled. Storage restrictions do not disable the controls.
+
+The homepage image, `tacterm-windows.png`, is an unedited capture of the native
+Windows development build, with a custom color palette and three real tabs:
+`workspace`, `checks`, and `README.md`. The active tab shows actual Git history
+and a run of the website theme tests. It is not a mockup or a screenshot of the
+published release's default configuration. Keep the capture's intrinsic size
+in the HTML in sync when replacing it; the image links to its full-size version.
+Capture helpers and the isolated demo configuration live locally under
+`target/site-capture/`, outside the published repository.
+
+Run download metadata and theme behavior checks with:
+
+```sh
+node --test website/releases.test.mjs website/theme.test.mjs
+```
+
 ## Build
 
 From the repository root, with Node.js 24 or later:
@@ -26,9 +47,14 @@ asset and navigation paths are checked in the same layout as GitHub Pages.
 
 `FORK_STATUS.md` is the source for the implemented changes, review date, and
 release/platform status. The build validates the required sections, renders four
-selected highlights on the homepage, and generates the complete `status.html`.
+selected highlights on the homepage, and generates the complete `status.html`
+with section navigation. Homepage highlights use concise editorial summaries
+in `build.mjs`, each checked against an implemented area in the source document;
+review those summaries alongside changes to the underlying feature.
 Rust requirements come from `Cargo.toml`. Update the source documents instead of
-duplicating their current status in the homepage. Update highlight selection in
+duplicating version or validation details in the homepage. The page leads with
+the product, then practical differences, downloads, compatibility questions,
+source builds, and the relationship with Rio. Update highlight selection in
 `build.mjs` if an area is renamed. The renderer supports the headings, paragraphs,
 lists, tables, links, bold text, and inline code used by the status document.
 
@@ -38,7 +64,7 @@ validated against `release.json` and the real attached assets. Downloads are onl
 shown after publication, never guessed from a version number. API or manifest
 errors fail the build rather than replacing a working site with broken links.
 For offline previews, supply `--release-file path/to/release.json`. Without either
-option the local build shows the not-yet-published state.
+option the local build links to GitHub Releases without guessing available downloads.
 
 ## Publishing
 
