@@ -63,7 +63,8 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: '0'
-      CARGO_BUILD_JOBS: ${{ inputs.cold_memory_trial && '4' || '2' }}
+      # Windows and ARM benefit from four jobs; keep x64 Linux/macOS at two.
+      CARGO_BUILD_JOBS: ${{ (inputs.cold_memory_trial || matrix.platform == 'windows' || matrix.arch == 'arm64') && '4' || '2' }}
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8'

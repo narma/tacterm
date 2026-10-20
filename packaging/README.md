@@ -45,7 +45,8 @@ Linux icon theme. The Linux desktop entry and application ID both use
 Windows binaries are unsigned. macOS apps are ad-hoc signed and not notarized;
 Developer ID signing and notarization require separately configured credentials.
 Native CLI smoke checks do not replace GUI/GPU or older-OS compatibility testing.
-Hosted builds use thin LTO, no debug information, and two compiler jobs.
+Hosted builds use thin LTO and no debug information. Windows and ARM builds use
+four compiler jobs; Linux x64 and macOS Intel use two.
 The manual `cold_memory_trial` option tests four jobs on every native target,
 skips Rust cache restore/save, and uploads host memory samples. It permits a
 feature branch and rejects publication. Each build uploads a
