@@ -1,254 +1,27 @@
-name: Tacterm release
-
+name: Verify Node 24 artifact downloads
 on:
-  push:
-    tags: ['tacterm-v*']
-  workflow_dispatch:
-    inputs:
-      publish:
-        description: 'Publish an existing matching tag after all native builds pass'
-        type: boolean
-        default: false
-      cold_memory_trial:
-        description: 'Non-publishing four-job build without Rust cache, with host memory sampling'
-        type: boolean
-        default: false
-
+  workflow_dispatch: {}
 permissions:
   contents: read
-
-concurrency:
-  group: tacterm-release${{ inputs.cold_memory_trial && '-memory-trial' || '' }}
-  cancel-in-progress: false
-
+  actions: read
 jobs:
-  prepare:
-    if: github.repository == 'narma/tacterm'
-    runs-on: ubuntu-22.04
-    outputs:
-      version: ${{ steps.release.outputs.version }}
-      tag: ${{ steps.release.outputs.tag }}
-      publish: ${{ steps.release.outputs.publish }}
-      matrix: ${{ steps.release.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Validate release source
-        if: ${{ github.event_name == 'push' || inputs.publish }}
-        run: git merge-base --is-ancestor HEAD origin/main
-      - name: Reject publication during memory trial
-        if: ${{ inputs.cold_memory_trial && inputs.publish }}
-        run: node -e "throw new Error('Memory trials cannot publish')"
-      - name: Prepare native matrix
-        id: release
-        env:
-          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
-          GH_TOKEN: ${{ github.token }}
-        run: node packaging/release.mjs prepare
-      - name: Check release validation
-        run: node --test packaging/release.test.mjs
-
-  build:
-    name: ${{ matrix.id }}
-    needs: prepare
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    # Keep the target's native runner for packaging; compile macOS x64 on ARM.
-    runs-on: ${{ matrix.id == 'macos-x64' && 'macos-15' || matrix.runner }}
-    timeout-minutes: 90
-    env:
-      CARGO_TERM_COLOR: always
-      CARGO_INCREMENTAL: '0'
-      # Only Linux x64 uses two jobs; both macOS targets compile on ARM.
-      CARGO_BUILD_JOBS: ${{ (inputs.cold_memory_trial || matrix.id != 'linux-x64') && '4' || '2' }}
-      CARGO_PROFILE_RELEASE_DEBUG: '0'
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8'
-      MACOSX_DEPLOYMENT_TARGET: '14.0'
-      TACTERM_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -yq
-          sudo apt-get install -yq pkg-config cmake clang libfontconfig1-dev libfreetype6-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libx11-dev libxcb1-dev libvulkan1 glslang-tools
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        if: ${{ !inputs.cold_memory_trial }}
-        with:
-          key: tacterm-release-${{ matrix.id }}
-          # Keep only registry crates used by this workspace.
-          cache-all-crates: false
-          cache-bin: false
-      - name: Build release executable
-        if: ${{ !inputs.cold_memory_trial }}
-        run: cargo +stable build --locked --release -p rioterm --bin tacterm --features wgpu --target ${{ matrix.target }} --timings
-      - name: Cold build with host memory sampling
-        if: ${{ inputs.cold_memory_trial }}
-        shell: bash
-        env:
-          BUILD_TARGET: ${{ matrix.target }}
-        run: |
-          mkdir -p target/ci-memory
-          node --input-type=module <<'NODE'
-          import os from 'node:os';
-          import fs from 'node:fs';
-          import { spawn, execFileSync } from 'node:child_process';
-          const dir = 'target/ci-memory';
-          const started = Date.now();
-          let minimumFree = os.totalmem();
-          let minimumAvailable = os.totalmem();
-          let samples = 0;
-          function snapshot() {
-            const row = { seconds: (Date.now() - started) / 1000, freeBytes: os.freemem() };
-            // Linux available memory includes reclaimable cache. macOS free
-            // memory alone is not memory pressure: retain VM/swap counters too.
-            if (process.platform === 'linux') {
-              const info = fs.readFileSync('/proc/meminfo', 'utf8');
-              row.meminfo = info;
-              row.availableBytes = Number(/^MemAvailable:\s+(\d+)/m.exec(info)[1]) * 1024;
-              minimumAvailable = Math.min(minimumAvailable, row.availableBytes);
-            }
-            if (process.platform === 'darwin') {
-              row.vmStat = execFileSync('vm_stat', { encoding: 'utf8' });
-              row.swap = execFileSync('sysctl', ['vm.swapusage'], { encoding: 'utf8' });
-            }
-            if (process.platform === 'win32' && samples % 5 === 0) {
-              row.memoryCounters = execFileSync('powershell.exe', ['-NoProfile', '-Command',
-                'Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory | Select-Object AvailableBytes,CommittedBytes,CommitLimit,PagesPersec | ConvertTo-Json -Compress'],
-                { encoding: 'utf8' }).trim();
-            }
-            minimumFree = Math.min(minimumFree, row.freeBytes);
-            samples++;
-            fs.appendFileSync(`${dir}/samples.jsonl`, JSON.stringify(row) + '\n');
-          }
-          snapshot();
-          const timer = setInterval(snapshot, 2000);
-          const child = spawn(process.platform === 'win32' ? 'cargo.exe' : 'cargo',
-            ['+stable', 'build', '--locked', '--release', '-p', 'rioterm', '--bin', 'tacterm',
-             '--features', 'wgpu', '--target', process.env.BUILD_TARGET, '--timings'],
-            { stdio: 'inherit' });
-          const result = await new Promise(resolve => {
-            child.once('error', error => resolve({ code: 1, error: error.message }));
-            child.once('exit', (code, signal) => resolve({ code: code ?? 1, signal }));
-          });
-          clearInterval(timer);
-          snapshot();
-          const summary = {
-            ...result, target: process.env.BUILD_TARGET, jobs: process.env.CARGO_BUILD_JOBS,
-            totalBytes: os.totalmem(), minimumFreeBytes: minimumFree,
-            minimumAvailableBytes: process.platform === 'linux' ? minimumAvailable : null,
-            seconds: (Date.now() - started) / 1000, samples,
-            scope: 'Whole host sampled every 2 seconds; not exact process peak RSS'
-          };
-          fs.writeFileSync(`${dir}/summary.json`, JSON.stringify(summary, null, 2));
-          console.log(summary);
-          process.exitCode = result.code;
-          NODE
-      - name: Upload memory measurements
-        if: ${{ !cancelled() && inputs.cold_memory_trial }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-memory-${{ matrix.id }}
-          path: target/ci-memory/
-          if-no-files-found: error
-          retention-days: 7
-      - name: Remove packaging output restored from the Rust cache
-        run: node packaging/release.mjs clean
-      - name: Package and smoke-test native executable
-        if: matrix.id != 'macos-x64'
-        run: node packaging/release.mjs pack ${{ matrix.id }}
-      - name: Stage macOS x64 executable for native validation
-        if: matrix.id == 'macos-x64'
-        run: |
-          test "$(lipo -archs target/x86_64-apple-darwin/release/tacterm)" = x86_64
-          mkdir -p "$RUNNER_TEMP/macos-x64-transfer"
-          cd target/x86_64-apple-darwin/release
-          shasum -a 256 tacterm > "$RUNNER_TEMP/macos-x64-transfer/SHA256SUMS"
-          tar -czf "$RUNNER_TEMP/macos-x64-transfer/executable.tar.gz" tacterm
-      - name: Upload macOS x64 executable for native validation
-        if: matrix.id == 'macos-x64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-binary-macos-x64
-          path: ${{ runner.temp }}/macos-x64-transfer/
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-      - name: Compile Windows installer from the portable executable
-        if: runner.os == 'Windows'
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
-        with:
-          path: packaging/windows/tacterm.iss
-          # v1.2.9 reads each line as one compiler argument.
-          options: |
-            /DReleaseVersion=${{ needs.prepare.outputs.version }}
-            /DReleaseArch=${{ matrix.arch }}
-          install_latest: 'true'
-      - name: Smoke-test Windows installer and record its checksum
-        if: runner.os == 'Windows'
-        run: |
-          ./packaging/windows/test-installer.ps1 -Version '${{ needs.prepare.outputs.version }}' -Arch '${{ matrix.arch }}'
-          node packaging/release.mjs setup ${{ matrix.id }}
-      - uses: actions/upload-artifact@v4
-        if: matrix.id != 'macos-x64'
-        with:
-          name: tacterm-${{ matrix.id }}${{ runner.os == 'Windows' && '-portable' || '' }}
-          path: |
-            target/release-assets/*.zip
-            target/release-assets/*.tar.gz
-            target/release-assets/build-*.json
-          if-no-files-found: error
-          retention-days: 7
-          # ZIP/tar.gz packages are already compressed.
-          compression-level: 0
-      - uses: actions/upload-artifact@v4
-        if: runner.os == 'Windows'
-        with:
-          name: tacterm-${{ matrix.id }}-setup
-          path: |
-            target/release-assets/*-setup.exe
-            target/release-assets/setup-*.json
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-      - name: Upload build timings
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-timings-${{ matrix.id }}
-          path: target/cargo-timings/
-          if-no-files-found: ignore
-          retention-days: 7
-      # Run after all package uploads, before rust-cache's post step.
-      # Packaging output is regenerated every run and cannot accelerate Cargo.
-      - name: Keep packaging output out of the Rust cache
-        run: node packaging/release.mjs clean
-
-  package-macos-x64:
+  intel:
     name: macos-x64 native validation and packaging
-    needs: build
     runs-on: macos-15-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: 9e70a23389028aa1e717862307256c92932c7c02
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
       - uses: actions/download-artifact@v7
         with:
           name: release-binary-macos-x64
           path: target/macos-x64-transfer
+          run-id: 39492753822
+          github-token: ${{ github.token }}
       - name: Verify transferred executable
         run: |
           test "$(uname -m)" = x86_64
@@ -258,52 +31,23 @@ jobs:
           shasum -a 256 -c ../../macos-x64-transfer/SHA256SUMS
           test "$(lipo -archs tacterm)" = x86_64
       - name: Package and smoke-test native executable
-        run: node packaging/release.mjs pack macos-x64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tacterm-macos-x64
-          path: |
-            target/release-assets/*.zip
-            target/release-assets/build-*.json
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
-  publish:
-    needs: [prepare, build, package-macos-x64]
+        run: node --input-type=module -e "process.env.GITHUB_SHA='9e70a23389028aa1e717862307256c92932c7c02'; process.argv=['node','packaging/release.mjs','pack','macos-x64']; await import('./packaging/release.mjs');"
+  assembly:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          ref: 9e70a23389028aa1e717862307256c92932c7c02
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
       - uses: actions/download-artifact@v7
         with:
           pattern: tacterm-*
           merge-multiple: true
           path: target/release-assets
+          run-id: 39492753822
+          github-token: ${{ github.token }}
       - name: Verify complete release and checksums
-        run: node packaging/release.mjs assemble
-      - name: Publish all platforms together
-        if: needs.prepare.outputs.publish == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node packaging/release.mjs publish
-
-  website:
-    needs: [prepare, publish]
-    if: needs.prepare.outputs.publish == 'true'
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - name: Refresh download links from the published release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --repo narma/tacterm --ref main
+        run: node --input-type=module -e "process.env.GITHUB_SHA='9e70a23389028aa1e717862307256c92932c7c02'; process.argv=['node','packaging/release.mjs','assemble']; await import('./packaging/release.mjs');"
