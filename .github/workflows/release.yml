@@ -245,7 +245,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: release-binary-macos-x64
           path: target/macos-x64-transfer
@@ -282,7 +282,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: tacterm-*
           merge-multiple: true
