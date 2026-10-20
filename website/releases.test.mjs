@@ -21,6 +21,38 @@ test('offers every platform and architecture of a complete published preview', (
   assert.match(result.checksumUrl, /\/tacterm-v0\.1\.0-alpha\.1\/SHA256SUMS$/);
 });
 
+function installerRelease() {
+  const manifest = completeRelease();
+  manifest.schemaVersion = 2;
+  manifest.assets = manifest.assets.flatMap((asset) => {
+    if (asset.platform !== 'windows') return [{ ...asset, kind: 'archive' }];
+    return ['portable', 'setup'].map((kind) => {
+      const name = `tacterm-${manifest.version}-windows-${asset.arch}-${kind}.${kind === 'setup' ? 'exe' : 'zip'}`;
+      return { ...asset, kind, name, url: `https://github.com/narma/tacterm/releases/download/${manifest.tag}/${name}` };
+    });
+  });
+  return manifest;
+}
+
+test('accepts portable and setup for both Windows architectures', () => {
+  assert.equal(validateRelease(installerRelease()).assets.length, 8);
+});
+
+test('rejects missing or duplicate installers', () => {
+  const missing = installerRelease();
+  missing.assets.pop();
+  assert.throws(() => validateRelease(missing), /both Windows installers/);
+  const duplicate = installerRelease();
+  duplicate.assets[1] = duplicate.assets[0];
+  assert.throws(() => validateRelease(duplicate), /duplicate/);
+});
+
+test('rejects a setup download disguised as a ZIP', () => {
+  const manifest = installerRelease();
+  manifest.assets[1].name = manifest.assets[1].name.replace('.exe', '.zip');
+  assert.throws(() => validateRelease(manifest), /metadata/);
+});
+
 test('does not offer a partial matrix as a completed release', () => {
   const manifest = completeRelease();
   manifest.assets.pop();

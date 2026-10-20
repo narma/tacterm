@@ -3,15 +3,19 @@ import { readFile } from 'node:fs/promises';
 const repo = 'narma/tacterm';
 const allowedPlatforms = ['windows', 'macos', 'linux'];
 export function validateRelease(manifest) {
-  if (manifest.schemaVersion !== 1 || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version) || manifest.tag !== `tacterm-v${manifest.version}`) throw new Error('Unsupported tacterm release manifest');
-  if (!Array.isArray(manifest.assets) || manifest.assets.length !== 6) throw new Error('Expected all six native downloads');
+  if (![1, 2].includes(manifest.schemaVersion) || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version) || manifest.tag !== `tacterm-v${manifest.version}`) throw new Error('Unsupported tacterm release manifest');
+  if (!Array.isArray(manifest.assets) || manifest.assets.length !== (manifest.schemaVersion === 1 ? 6 : 8)) throw new Error('Expected all six native downloads and, for schema 2, both Windows installers');
   const ids = new Set();
   for (const asset of manifest.assets) {
     const id = `${asset.platform}-${asset.arch}`;
-    if (!allowedPlatforms.includes(asset.platform) || !['x64', 'arm64'].includes(asset.arch) || ids.has(id)) throw new Error('Invalid or duplicate download architecture');
-    ids.add(id);
-    const extension = asset.platform === 'linux' ? 'tar.gz' : 'zip';
-    if (asset.name !== `tacterm-${manifest.version}-${id}.${extension}` || !/^[a-f0-9]{64}$/.test(asset.sha256) || !(asset.bytes > 0)) throw new Error('Invalid download metadata');
+    const kind = manifest.schemaVersion === 1 ? 'archive' : asset.kind;
+    const kinds = manifest.schemaVersion === 2 && asset.platform === 'windows' ? ['portable', 'setup'] : ['archive'];
+    const key = `${id}-${kind}`;
+    if (!allowedPlatforms.includes(asset.platform) || !['x64', 'arm64'].includes(asset.arch) || !kinds.includes(kind) || ids.has(key)) throw new Error('Invalid or duplicate download architecture or package kind');
+    ids.add(key);
+    const extension = kind === 'setup' ? 'exe' : asset.platform === 'linux' ? 'tar.gz' : 'zip';
+    const suffix = manifest.schemaVersion === 2 && asset.platform === 'windows' ? `-${kind}` : '';
+    if (asset.name !== `tacterm-${manifest.version}-${id}${suffix}.${extension}` || !/^[a-f0-9]{64}$/.test(asset.sha256) || !(asset.bytes > 0)) throw new Error('Invalid download metadata');
     const expected = `https://github.com/${repo}/releases/download/${manifest.tag}/${asset.name}`;
     if (asset.url !== expected) throw new Error('Unexpected download host or path');
   }

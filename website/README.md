@@ -63,7 +63,7 @@ source builds, and the relationship with Rio. Update highlight selection in
 lists, tables, links, bold text, and inline code used by the status document.
 
 The published build uses `--fetch-release` to read the newest complete tacterm
-release (including previews) from GitHub. Its six download links and checksums are
+release (including previews) from GitHub. Its archive and installer download links and checksums are
 validated against `release.json` and the real attached assets. Downloads are only
 shown after publication, never guessed from a version number. API or manifest
 errors fail the build rather than replacing a working site with broken links.

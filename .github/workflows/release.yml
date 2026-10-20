@@ -81,10 +81,34 @@ jobs:
         run: cargo +stable build --locked --release -p rioterm --bin tacterm --features wgpu --target ${{ matrix.target }}
       - name: Package and smoke-test native executable
         run: node packaging/release.mjs pack ${{ matrix.id }}
+      - name: Compile Windows installer from the portable executable
+        if: runner.os == 'Windows'
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
+        with:
+          path: packaging/windows/tacterm.iss
+          options: /DReleaseVersion=${{ needs.prepare.outputs.version }} /DReleaseArch=${{ matrix.arch }}
+          install_latest: 'true'
+      - name: Smoke-test Windows installer and record its checksum
+        if: runner.os == 'Windows'
+        run: |
+          ./packaging/windows/test-installer.ps1 -Version '${{ needs.prepare.outputs.version }}' -Arch '${{ matrix.arch }}'
+          node packaging/release.mjs setup ${{ matrix.id }}
       - uses: actions/upload-artifact@v4
         with:
-          name: tacterm-${{ matrix.id }}
-          path: target/release-assets/*
+          name: tacterm-${{ matrix.id }}${{ runner.os == 'Windows' && '-portable' || '' }}
+          path: |
+            target/release-assets/*.zip
+            target/release-assets/*.tar.gz
+            target/release-assets/build-*.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: tacterm-${{ matrix.id }}-setup
+          path: |
+            target/release-assets/*-setup.exe
+            target/release-assets/setup-*.json
           if-no-files-found: error
           retention-days: 7
 

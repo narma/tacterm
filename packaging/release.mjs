@@ -41,7 +41,7 @@ async function pack(id) {
   if (!target) throw new Error(`Unknown release target: ${id}`);
   const host = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
   if (host !== target.platform || process.arch !== (target.arch === 'x64' ? 'x64' : 'arm64')) throw new Error('Package must be built and smoke-tested on its native OS/architecture');
-  const stem = `tacterm-${version}-${id}`;
+  const stem = `tacterm-${version}-${id}${target.platform === 'windows' ? '-portable' : ''}`;
   const stageParent = resolve('target/release-staging');
   const stage = join(stageParent, stem);
   try { await stat(stage); throw new Error('Staging directory already exists; use a fresh build checkout'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -90,6 +90,17 @@ async function pack(id) {
   if (!help.includes('--working-dir')) throw new Error('Packaged CLI help is incomplete');
   console.log(`Native CLI smoke check passed: ${versionOutput.trim()}`);
   await copyFile('LICENSE', join(stage, 'LICENSE'));
+  // Preserve the license notices shipped with the native workspace and bundled font.
+  for (const license of [
+    'corcovado/LICENSE', 'corcovado/ORIGINAL_LICENSE', 'rio-window/LICENSE',
+    'rio-grapheme-width/LICENSE', 'rio-backend/LICENSE', 'sugarloaf/LICENSE',
+    'teletypewriter/LICENSE', 'frontends/rioterm/LICENSE',
+    'sugarloaf/src/font/resources/CascadiaCode/LICENSE',
+  ]) {
+    const destination = join(stage, 'licenses', license);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(license, destination);
+  }
   await writeFile(join(stage, 'README.md'), installation(target));
   await mkdir(join(stage, 'extras'), { recursive: true });
   await copyFile('misc/rio.terminfo', join(stage, 'extras/rio.terminfo'));
@@ -105,15 +116,40 @@ async function pack(id) {
   console.log(`Packaged: ${archive}`);
 }
 
+async function setup(id) {
+  const target = targets.find((item) => item.id === id && item.platform === 'windows');
+  if (!target) throw new Error(`Unknown Windows target: ${id}`);
+  const portable = JSON.parse(await readFile(join(assetsDir, `build-${id}.json`), 'utf8'));
+  const archive = `tacterm-${version}-${id}-setup.exe`;
+  const path = join(assetsDir, archive);
+  await writeFile(join(assetsDir, `setup-${id}.json`), JSON.stringify({
+    ...portable, archive, archiveSha256: await hashFile(path), bytes: (await stat(path)).size,
+    format: 'exe', kind: 'setup',
+  }, null, 2) + '\n');
+}
+
 async function assemble() {
   const records = [];
   for (const target of targets) {
     const record = JSON.parse(await readFile(join(assetsDir, `build-${target.id}.json`), 'utf8'));
     if (record.version !== version || record.commit !== sha || record.id !== target.id) throw new Error('Artifacts do not come from the same release commit and version');
+    const expected = `tacterm-${version}-${target.id}${target.platform === 'windows' ? '-portable' : ''}.${target.format}`;
+    if (record.archive !== expected) throw new Error(`Unexpected archive name: ${target.id}`);
     if (await hashFile(join(assetsDir, record.archive)) !== record.archiveSha256) throw new Error(`Archive checksum mismatch: ${target.id}`);
-    records.push(record);
+    records.push({ ...record, kind: target.platform === 'windows' ? 'portable' : 'archive' });
+    if (target.platform === 'windows') {
+      const installer = JSON.parse(await readFile(join(assetsDir, `setup-${target.id}.json`), 'utf8'));
+      if (installer.version !== version || installer.commit !== sha || installer.id !== target.id ||
+          installer.platform !== target.platform || installer.arch !== target.arch ||
+          !record.binarySha256 || installer.binarySha256 !== record.binarySha256 ||
+          installer.archive !== `tacterm-${version}-${target.id}-setup.exe`) {
+        throw new Error(`Installer does not match portable build: ${target.id}`);
+      }
+      if (await hashFile(join(assetsDir, installer.archive)) !== installer.archiveSha256) throw new Error(`Installer checksum mismatch: ${target.id}`);
+      records.push({ ...installer, kind: 'setup' });
+    }
   }
-  const manifest = { schemaVersion: 1, version, tag, commit: sha, upstreamVersion, prerelease: version.includes('-'), assets: records.map(({ archive, archiveSha256, platform, arch, minimum, runtime, signing, bytes }) => ({ name: archive, sha256: archiveSha256, platform, arch, minimum, runtime, signing, bytes, url: `https://github.com/${repo}/releases/download/${tag}/${archive}` })) };
+  const manifest = { schemaVersion: 2, version, tag, commit: sha, upstreamVersion, prerelease: version.includes('-'), assets: records.map(({ archive, archiveSha256, platform, arch, minimum, runtime, signing, bytes, kind }) => ({ name: archive, sha256: archiveSha256, platform, arch, minimum, runtime, signing, bytes, kind, url: `https://github.com/${repo}/releases/download/${tag}/${archive}` })) };
   await writeFile(join(assetsDir, 'release.json'), JSON.stringify(manifest, null, 2) + '\n');
   const checksumNames = [...records.map((record) => record.archive), 'release.json'];
   await writeFile(join(assetsDir, 'SHA256SUMS'), (await Promise.all(checksumNames.map(async (name) => `${await hashFile(join(assetsDir, name))}  ${name}`))).join('\n') + '\n');
@@ -128,7 +164,7 @@ async function publish() {
   if (tagCommit.status !== 0 || tagCommit.stdout.trim() !== sha) throw new Error('A matching release tag must already point to this exact commit');
   const highlights = (await readFile(resolve("packaging", "release-notes", `${version}.md`), "utf8")).trim();
   if (!highlights) throw new Error("Release highlights are required");
-  const notes = `# tacterm ${version}\n\n${highlights}\n\nSource: https://github.com/${repo}/commit/${sha}\nChanges: https://github.com/${repo}/blob/${sha}/FORK_STATUS.md\n\n## Downloads\n\nWindows ZIPs, macOS Tacterm.app ZIPs, and Linux tar.gz archives are attached for x64 and ARM64. Each target is compiled on its native OS/architecture and checked with --version and --help. GUI/GPU sessions are not validated by these smoke checks.\n\n- Windows binaries are **unsigned** and require the Microsoft Visual C++ v14 Redistributable for the matching architecture: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist\n- macOS apps have an **ad-hoc signature and are not notarized**. See Apple's per-app opening instructions: https://support.apple.com/102445\n- macOS requires 14+, Linux requires glibc 2.35+ and graphics/font libraries.\n- The packaged command is tacterm. Settings use an independent tacterm directory with one-time import from Rio; some internal branding remains Rio-compatible.\n\nEach archive contains its installation README, MIT license, and release-info.json. Check SHA256SUMS before installing. These archives do not modify your existing installation.\n`;
+  const notes = `# tacterm ${version}\n\n${highlights}\n\nSource: https://github.com/${repo}/commit/${sha}\nChanges: https://github.com/${repo}/blob/${sha}/FORK_STATUS.md\n\n## Downloads\n\nWindows portable ZIPs and Setup installers, macOS Tacterm.app ZIPs, and Linux tar.gz archives are attached for x64 and ARM64. Each target is compiled on its native OS/architecture and checked with --version and --help. GUI/GPU sessions are not validated by these smoke checks.\n\n- Windows binaries are **unsigned** and require the Microsoft Visual C++ v14 Redistributable for the matching architecture: https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist\n- macOS apps have an **ad-hoc signature and are not notarized**. See Apple's per-app opening instructions: https://support.apple.com/102445\n- macOS requires 14+, Linux requires glibc 2.35+ and graphics/font libraries.\n- The packaged command is tacterm. Settings use an independent tacterm directory with one-time import from Rio; some internal branding remains Rio-compatible.\n\nEach archive contains its installation README, MIT license, and release-info.json. Check SHA256SUMS before installing. Portable archives do not modify your existing installation. Windows Setup defaults to the current user without elevation, offers an all-users mode, and adds a Start menu shortcut. Desktop shortcut creation and launch after setup are optional; uninstalling preserves user settings.\n`;
   const notesPath = resolve('target/release-notes.md');
   await writeFile(notesPath, notes);
   // The verified existing tag fixes the source. Leave target_commitish at its
@@ -150,6 +186,7 @@ async function publish() {
 const [command, id] = process.argv.slice(2);
 if (command === 'prepare') await prepare();
 else if (command === 'pack') await pack(id);
+else if (command === 'setup') await setup(id);
 else if (command === 'assemble') await assemble();
 else if (command === 'publish') await publish();
-else throw new Error('Usage: node packaging/release.mjs prepare | pack TARGET_ID | assemble | publish');
+else throw new Error('Usage: node packaging/release.mjs prepare | pack TARGET_ID | setup TARGET_ID | assemble | publish');
