@@ -135,7 +135,9 @@ navigation. This is a website-only change; it does not change native builds.
 The homepage's illustrative terminal was replaced with an actual Windows
 development-build screenshot showing three native tabs and a real theme-test
 run. The caption identifies the custom theme and development build, and the
-image can be opened at full size.
+image can be opened at full size. The capture was refreshed with the cursor
+beside the final prompt and no mouse pointer in the frame; the local demo
+script now omits the final prompt's trailing newline.
 The homepage now explains practical differences before downloads, with
 compatibility questions and source-build instructions following them. Concise
 editorial summaries link to this complete status document, which includes
