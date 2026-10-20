@@ -9,7 +9,7 @@ and retain the Rio base version unless this variable is supplied.
 ## Build and publish
 
 1. Integrate and validate changes on `main`; update `FORK_STATUS.md`, this version
-   file, and `packaging/notes/VERSION.md` with the release's user-facing highlights.
+   file, and `packaging/release-notes/VERSION.md` with the release's user-facing highlights.
    The publisher uses those highlights before installation and download details.
 2. Push a tag `tacterm-vVERSION` matching the committed version. This automatically
    runs the **Tacterm release** workflow. A manual run with `publish` enabled also
