@@ -13,9 +13,6 @@ on:
         default: false
 
 # This comparison checks out exactly the source from the four-job run.
-env:
-  GITHUB_SHA: 18fcb26f53b077cc3df5114513881e176d2986bf
-
 permissions:
   contents: read
 
@@ -51,7 +48,7 @@ jobs:
         env:
           PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
           GH_TOKEN: ${{ github.token }}
-        run: node packaging/release.mjs prepare
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" prepare
       - name: Check release validation
         run: node --test packaging/release.test.mjs
 
@@ -80,7 +77,7 @@ jobs:
         with:
           node-version: '24'
       - name: Verify comparison source
-        run: node -e "const cp=require('node:child_process'); const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(); if(sha !== '18fcb26f53b077cc3df5114513881e176d2986bf' || process.env.GITHUB_SHA !== sha) throw new Error('Comparison source mismatch'); console.log('Source commit = '+sha)"
+        run: node -e "const cp=require('node:child_process'); const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(); if(sha !== '18fcb26f53b077cc3df5114513881e176d2986bf') throw new Error('Comparison source mismatch'); console.log('Source commit = '+sha)"
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -169,9 +166,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Remove packaging output restored from the Rust cache
-        run: node packaging/release.mjs clean
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" clean
       - name: Package and smoke-test native executable
-        run: node packaging/release.mjs pack ${{ matrix.id }}
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" pack ${{ matrix.id }}
       - name: Compile Windows installer from the portable executable
         if: runner.os == 'Windows'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
@@ -186,7 +183,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           ./packaging/windows/test-installer.ps1 -Version '${{ needs.prepare.outputs.version }}' -Arch '${{ matrix.arch }}'
-          node packaging/release.mjs setup ${{ matrix.id }}
+          node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" setup ${{ matrix.id }}
       - uses: actions/upload-artifact@v4
         with:
           name: tacterm-${{ matrix.id }}${{ runner.os == 'Windows' && '-portable' || '' }}
@@ -219,7 +216,7 @@ jobs:
       # Run after all package uploads, before rust-cache's post step.
       # Packaging output is regenerated every run and cannot accelerate Cargo.
       - name: Keep packaging output out of the Rust cache
-        run: node packaging/release.mjs clean
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" clean
 
   publish:
     needs: [prepare, build]
@@ -241,12 +238,12 @@ jobs:
           merge-multiple: true
           path: target/release-assets
       - name: Verify complete release and checksums
-        run: node packaging/release.mjs assemble
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" assemble
       - name: Publish all platforms together
         if: needs.prepare.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node packaging/release.mjs publish
+        run: node -e "process.env.GITHUB_SHA='18fcb26f53b077cc3df5114513881e176d2986bf';process.argv.splice(1,0,'packaging/release.mjs');import('./packaging/release.mjs')" publish
 
   website:
     needs: [prepare, publish]
