@@ -66,9 +66,15 @@ The website build passed with live release metadata. Source-build naming and
 configuration compatibility text are updated, and the internal screenshot-format
 maintenance section has been removed from the public status page.
 
-Release 0.1.0 is prepared with six native OS/architecture builds, checksum
-verification and feature-focused release notes. Publication is pending the
-release workflow. Measurements summarized in those notes compare individual
+[Release 0.1.0](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0)
+is published from `7e8a12f8b2` with all six native OS/architecture archives,
+checksums and feature-focused release notes. The
+[release workflow](https://github.com/narma/tacterm/actions/runs/39382884459)
+passed every native build and packaging check. The downloaded Windows x64
+archive and executable matched their published SHA256 values and reported
+`tacterm 0.1.0`. The [native test workflow](https://github.com/narma/tacterm/actions/runs/39382808323)
+also passed on Windows, macOS and Linux.
+Measurements summarized in those notes compare individual
 optimization stages on one Windows workstation; they are not cumulative or a
 single final-release-versus-upstream benchmark. Detailed local reports and
 helpers remain excluded from the repository.
@@ -138,6 +144,7 @@ instead of incorrectly implying that no release exists.
   some in-app labels retain Rio compatibility. Current source builds use an
   independent configuration directory with one-time Rio import. Published
   `0.1.0-alpha.1` binaries still share Rio configuration paths.
+- [Version 0.1.0](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0) is the first non-preview release, with independent settings and the tacterm executable name.
 - Independent releases are built by the [tacterm release workflow](.github/workflows/release.yml)
   for Windows, macOS, and Linux, each on native x64 and ARM64 runners.
   [Preview `0.1.0-alpha.1`](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0-alpha.1)
