@@ -1,8 +1,6 @@
 name: Tacterm release
 
 on:
-  push:
-    tags: ['tacterm-v*']
   workflow_dispatch:
     inputs:
       publish:
@@ -10,9 +8,13 @@ on:
         type: boolean
         default: false
       cold_memory_trial:
-        description: 'Non-publishing four-job build without Rust cache, with host memory sampling'
+        description: 'Non-publishing two-job comparison build without Rust cache, with host memory sampling'
         type: boolean
         default: false
+
+# This comparison checks out exactly the source from the four-job run.
+env:
+  GITHUB_SHA: 18fcb26f53b077cc3df5114513881e176d2986bf
 
 permissions:
   contents: read
@@ -33,6 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: 18fcb26f53b077cc3df5114513881e176d2986bf
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -41,8 +44,8 @@ jobs:
         if: ${{ !inputs.cold_memory_trial || inputs.publish }}
         run: git merge-base --is-ancestor HEAD origin/main
       - name: Reject publication during memory trial
-        if: ${{ inputs.cold_memory_trial && inputs.publish }}
-        run: node -e "throw new Error('Memory trials cannot publish')"
+        if: ${{ !inputs.cold_memory_trial || inputs.publish }}
+        run: node -e "throw new Error('This comparison requires cold_memory_trial=true and publish=false')"
       - name: Prepare native matrix
         id: release
         env:
@@ -63,7 +66,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: '0'
-      CARGO_BUILD_JOBS: ${{ inputs.cold_memory_trial && '4' || '2' }}
+      CARGO_BUILD_JOBS: '2'
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '8'
@@ -71,9 +74,13 @@ jobs:
       TACTERM_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: 18fcb26f53b077cc3df5114513881e176d2986bf
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: Verify comparison source
+        run: node -e "const cp=require('node:child_process'); const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(); if(sha !== '18fcb26f53b077cc3df5114513881e176d2986bf' || process.env.GITHUB_SHA !== sha) throw new Error('Comparison source mismatch'); console.log('Source commit = '+sha)"
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -223,6 +230,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: 18fcb26f53b077cc3df5114513881e176d2986bf
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
