@@ -1,6 +1,6 @@
 # tacterm website
 
-The website is a small static site published at <https://narma.github.io/tacterm/>.
+The website is a small static site published at <https://tacterm.dev/>.
 Source lives here on `main`. It uses Node.js built-ins, without package installation,
 third-party fonts, analytics, or runtime requests for content.
 

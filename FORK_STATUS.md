@@ -182,8 +182,11 @@ instead of incorrectly implying that no release exists.
 
 ## Project website
 
-- [tacterm website](https://narma.github.io/tacterm/): an independent project
+- [tacterm website](https://tacterm.dev/): an independent project
   homepage with source in [`website/`](website/README.md) on `main`.
+- The site moved to `https://tacterm.dev/` on 2026-10-20. Root-relative
+  stylesheet, script, and image URLs were checked on all three published pages;
+  HTTPS is enforced by GitHub Pages.
 - The change count and review date are generated from this document. Homepage
   summaries explain selected implemented changes; the complete technical status
   is published as `status.html`. Download metadata comes from the release manifest.
