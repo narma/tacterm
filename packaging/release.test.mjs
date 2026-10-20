@@ -93,3 +93,24 @@ test('rejects a tag that differs from the version committed in source', async ()
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Tag must match committed version/);
 });
+
+test('cleans cached packaging output without deleting compiled binaries or local reports', async () => {
+  const f = await fixture();
+  const stage = join(f.directory, 'target/release-staging/old-package');
+  const binary = join(f.directory, 'target/release/tacterm.exe');
+  const report = join(f.directory, 'target/local-benchmarks/report.txt');
+  await mkdir(stage, { recursive: true });
+  await writeFile(join(stage, 'stale.txt'), 'stale');
+  for (const file of [binary, report]) {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, 'preserved');
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = f.run('clean');
+    assert.equal(result.status, 0, result.stderr);
+    await assert.rejects(readFile(join(stage, 'stale.txt')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(f.assets, 'build-windows-x64.json')), { code: 'ENOENT' });
+    assert.equal(await readFile(binary, 'utf8'), 'preserved');
+    assert.equal(await readFile(report, 'utf8'), 'preserved');
+  }
+});

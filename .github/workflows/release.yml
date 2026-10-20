@@ -79,6 +79,8 @@ jobs:
           cache-all-crates: true
       - name: Build native release
         run: cargo +stable build --locked --release -p rioterm --bin tacterm --features wgpu --target ${{ matrix.target }}
+      - name: Remove packaging output restored from the Rust cache
+        run: node packaging/release.mjs clean
       - name: Package and smoke-test native executable
         run: node packaging/release.mjs pack ${{ matrix.id }}
       - name: Compile Windows installer from the portable executable

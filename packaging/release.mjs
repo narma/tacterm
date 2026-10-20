@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, copyFile, chmod, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, chmod, stat, rm } from 'node:fs/promises';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve, join, dirname } from 'node:path';
@@ -16,6 +16,17 @@ const upstreamVersion = /\[workspace.package\][\s\S]*?version\s*=\s*"([^"]+)"/.e
 const run = (program, args, options = {}) => execFileSync(program, args, { stdio: 'inherit', ...options });
 const hashFile = async (path) => createHash('sha256').update(await readFile(path)).digest('hex');
 const assetsDir = resolve('target/release-assets');
+
+async function clean() {
+  // rust-cache restores target/, including output from earlier packaging runs.
+  // Only these generated directories belong to packaging; preserve Cargo output.
+  const targetRoot = resolve(root, 'target');
+  for (const name of ['release-staging', 'release-assets']) {
+    const directory = resolve(targetRoot, name);
+    if (dirname(directory) !== targetRoot) throw new Error('Invalid packaging cleanup path');
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
 function installation(target) {
   const intro = `# tacterm ${version}\n\nPlatform: ${target.id}\nSource: https://github.com/${repo}/commit/${sha}\nRio base version: ${upstreamVersion}\nMinimum: ${target.minimum}\nSigning: ${target.signing}\n\n`;
@@ -185,8 +196,9 @@ async function publish() {
 
 const [command, id] = process.argv.slice(2);
 if (command === 'prepare') await prepare();
+else if (command === 'clean') await clean();
 else if (command === 'pack') await pack(id);
 else if (command === 'setup') await setup(id);
 else if (command === 'assemble') await assemble();
 else if (command === 'publish') await publish();
-else throw new Error('Usage: node packaging/release.mjs prepare | pack TARGET_ID | setup TARGET_ID | assemble | publish');
+else throw new Error('Usage: node packaging/release.mjs prepare | clean | pack TARGET_ID | setup TARGET_ID | assemble | publish');
