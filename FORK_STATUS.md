@@ -170,3 +170,10 @@ instead of incorrectly implying that no release exists.
   migration before promising fully isolated side-by-side settings.
 - Continue incorporating upstream changes and keep upstream PRs scoped to one
   problem each.
+
+## Website screenshot format
+
+On 2026-10-20, replaced the incorrectly named JPEG hero image with a fresh
+1444 × 1157 native Windows PNG capture. The website build now checks the PNG
+signature and IHDR header, derives image dimensions, and versions the image URL
+by content hash. The image was visually checked and the nine website tests passed.

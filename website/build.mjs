@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { loadRelease } from './releases.mjs';
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,16 @@ const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
 const release = await loadRelease({ file: option('--release-file', null), online: args.includes('--fetch-release') });
+const screenshot = await readFile(join(sourceDir, 'tacterm-windows.png'));
+if (screenshot.length < 33 ||
+    !screenshot.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    screenshot.readUInt32BE(8) !== 13 || screenshot.toString('ascii', 12, 16) !== 'IHDR') {
+  throw new Error('tacterm-windows.png must be a native lossless PNG capture, not a renamed JPEG');
+}
+const screenshotWidth = screenshot.readUInt32BE(16);
+const screenshotHeight = screenshot.readUInt32BE(20);
+if (!screenshotWidth || !screenshotHeight) throw new Error('Invalid screenshot dimensions');
+const screenshotVersion = createHash('sha256').update(screenshot).digest('hex').slice(0, 12);
 
 function downloadSection() {
   if (!release) return `<section id="downloads" class="downloads-section wrap" aria-labelledby="downloads-title"><p class="eyebrow">RELEASE BUILDS</p><h2 id="downloads-title">Get tacterm.</h2><p class="download-intro">Release metadata is not included in this build of the site. Visit <a href="https://github.com/narma/tacterm/releases">GitHub Releases</a> for available downloads, or <a href="#build">build from source</a>.</p><a class="text-link" href="${repo}/releases">View GitHub Releases ↗</a></section>`;
@@ -136,6 +147,8 @@ const reviewLabel = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 's
 const rustVersion = /rust-version\s*=\s*"([^"]+)"/.exec(cargo)?.[1];
 if (!rustVersion) throw new Error('Cargo.toml is missing rust-version');
 const replacements = {
+  SCREENSHOT_URL: escape(`${base}tacterm-windows.png?v=${screenshotVersion}`),
+  SCREENSHOT_WIDTH: screenshotWidth, SCREENSHOT_HEIGHT: screenshotHeight,
   THEME_SWITCHER: `<div class="theme-switcher" role="group" aria-label="Color theme" hidden><button type="button" data-theme-choice="light" aria-pressed="false" aria-label="Light theme" title="Light theme"><span aria-hidden="true">☀</span><span class="theme-label">Light</span></button><button type="button" data-theme-choice="dark" aria-pressed="false" aria-label="Dark theme" title="Dark theme"><span aria-hidden="true">☾</span><span class="theme-label">Dark</span></button><button type="button" data-theme-choice="system" aria-pressed="true" aria-label="System theme" title="Follow system theme"><span aria-hidden="true">◐</span><span class="theme-label">Auto</span></button></div>`,
   BASE: escape(base), URL: escape(siteUrl.href), COUNT: rows.length,
   REVIEW_DATE: escape(reviewLabel), RUST_VERSION: escape(rustVersion),

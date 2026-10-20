@@ -14,8 +14,12 @@ The homepage image, `tacterm-windows.png`, is an unedited capture of the native
 Windows development build, with a custom color palette and three real tabs:
 `workspace`, `checks`, and `README.md`. The active tab shows actual Git history
 and a run of the website theme tests. It is not a mockup or a screenshot of the
-published release's default configuration. Keep the capture's intrinsic size
-in the HTML in sync when replacing it; the image links to its full-size version.
+published release's default configuration. Capture the native window bitmap
+(for example, Alt+Print Screen on Windows) and save directly as PNG. Do not
+rename or transcode a lossy preview from an automation tool. The build validates
+the PNG signature and header, reads its intrinsic dimensions, and versions the
+image URL by content hash to invalidate cached captures. The image links to its
+full-size version.
 Capture helpers and the isolated demo configuration live locally under
 `target/site-capture/`, outside the published repository.
 
