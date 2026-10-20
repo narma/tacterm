@@ -65,6 +65,9 @@ preserved. Native macOS and Linux import behavior still needs validation.
 The website build passed with live release metadata. Source-build naming and
 configuration compatibility text are updated, and the internal screenshot-format
 maintenance section has been removed from the public status page.
+The homepage introduction now describes the project's ongoing direction rather
+than individual fixes; the static build and all 9 website tests passed on
+**2026-10-20** after this copy update.
 
 [Release 0.1.0](https://github.com/narma/tacterm/releases/tag/tacterm-v0.1.0)
 is published from `7e8a12f8b2` with all six native OS/architecture archives,
