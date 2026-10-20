@@ -22,10 +22,18 @@ try {
             throw "Installed license differs from portable: $relative"
         }
     }
-    $reported = & $installed --version
-    if ($LASTEXITCODE -ne 0 -or "$reported" -notlike "*$Version*") { throw "Unexpected version: $reported" }
-    $helpOutput = & $installed --help
-    if ($LASTEXITCODE -ne 0 -or "$helpOutput" -notlike '*--working-dir*') { throw 'Installed CLI help is incomplete' }
+    # Use explicit pipes, as in release.mjs: PowerShell does not reliably capture
+    # stdout from the Windows GUI-subsystem executable.
+    @'
+import { execFileSync } from 'node:child_process';
+const [executable, version] = process.argv.slice(2);
+const reported = execFileSync(executable, ['--version'], { encoding: 'utf8', timeout: 30000 });
+if (!reported.includes(version)) throw new Error(`Unexpected version: ${JSON.stringify(reported)}`);
+const help = execFileSync(executable, ['--help'], { encoding: 'utf8', timeout: 30000 });
+if (!help.includes('--working-dir')) throw new Error('Installed CLI help is incomplete');
+console.log(`Installed CLI smoke check passed: ${reported.trim()}`);
+'@ | node --input-type=module - $installed $Version
+    if ($LASTEXITCODE -ne 0) { throw 'Installed CLI smoke check failed' }
 } finally {
     $uninstaller = Join-Path $destination 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
