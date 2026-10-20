@@ -61,29 +61,3 @@ node packaging/release.mjs prepare
 ```
 
 Generated packages, test fixtures, and reports remain under ignored `target/`.
-
-## Windows installer
-
-Each Windows job compiles Rust once. The portable ZIP and Inno Setup installer
-package the same staged `tacterm.exe`. `Minionguyjpro/Inno-Setup-Action@v1.2.9`
-compiles `windows/tacterm.iss` with the release version and architecture.
-The action installs the current Inno Setup compiler on both Windows runners.
-
-Downloads are named `tacterm-VERSION-windows-ARCH-portable.zip` and
-`tacterm-VERSION-windows-ARCH-setup.exe`. CI artifacts also use `-portable`
-and `-setup`. Manifest schema 2 includes all eight downloads and their checksums;
-the website continues to accept schema 1 for previously published releases.
-
-Setup uses LZMA2 compression and an English wizard. By default it installs into
-`%LOCALAPPDATA%\Programs\tacterm` for the current user without elevation.
-The mode dialog also allows installation for all users into Program Files,
-which requests administrator rights. `/CURRENTUSER` and `/ALLUSERS` select
-the mode on the command line. Shortcuts follow the selected installation mode.
-
-Setup copies the executable, main license, workspace and bundled-font license
-notices, release metadata, and terminfo. It adds a Start menu shortcut and an
-uninstaller. A desktop shortcut and launch after installation are optional and
-unchecked by default; silent installation never launches the terminal. PATH
-and user settings remain unchanged. The Microsoft runtime remains a separate prerequisite.
-CI silently installs into a temporary directory, compares the installed EXE
-SHA256 against the portable EXE, checks its CLI, and uninstalls it.

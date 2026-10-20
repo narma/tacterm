@@ -41,16 +41,7 @@ with older operating systems also need broader testing.
   is the first non-preview release, with independent settings and the tacterm
   executable name. Downloads are available for Windows, macOS, and Linux on
   x64 and ARM64, with installation instructions and SHA256 checksums.
-- The next release workflow produces Windows Setup installers alongside portable
-  ZIP archives, named with `-setup` and `-portable` respectively. Both packages use
-  the same executable from one Rust build per architecture. Setup installs for the
-  current user without elevation by default, with an all-users mode available.
-  The English wizard uses LZMA2 compression and installs license notices, a Start
-  menu shortcut, and an uninstaller. Desktop shortcut creation and launch after
-  installation are optional; uninstalling preserves settings.
-  Packaging and website metadata tests pass locally; native installer compilation
-  and installation checks still require a GitHub Actions run.
-- Published 0.1.0 Windows downloads are portable ZIP archives. Windows 10 or later is required
+- Windows downloads are portable ZIP archives. Windows 10 or later is required
   for x64; ARM64 requires Windows 11. Install the matching Microsoft Visual C++
   v14 Runtime. Binaries are unsigned, so Windows may show an unknown-publisher warning.
 - macOS downloads contain `Tacterm.app` and require macOS 14 or later. The app
