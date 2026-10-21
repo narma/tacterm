@@ -3147,7 +3147,7 @@ impl Screen<'_> {
 
         let (drag_idx, center) = match self.renderer.island.as_mut() {
             Some(island) => {
-                island.set_drag_external(external && cfg!(windows));
+                island.set_drag_external(external);
                 if !island.update_drag(x_unscaled) {
                     // armed but still below the drag threshold
                     return;
@@ -3221,7 +3221,7 @@ impl Screen<'_> {
             })
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     pub fn tab_drag_preview_metrics(&self) -> Option<(f32, f32)> {
         let layout = self.island_tab_layout(self.context_manager.len());
         let width = (layout.tab_width - 6.0).max(24.0);
@@ -3674,7 +3674,9 @@ impl Screen<'_> {
 
             // Windows tracks a started tab transfer across Alt+Tab independently
             // of native mouse capture. Ordinary clicks still reset on blur.
-            if !(cfg!(windows) && self.tab_transfer_active()) {
+            if !(cfg!(any(windows, target_os = "macos", target_os = "linux"))
+                && self.tab_transfer_active())
+            {
                 if let Some(ref mut island) = self.renderer.island {
                     if island.is_dragging() {
                         island.cancel_drag();

@@ -176,6 +176,12 @@ pub enum StartCause {
 /// Describes an event from a [`Window`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowEvent {
+    /// Completion of a compositor-managed in-process tab drag. Coordinates
+    /// belong to the destination surface, so no global position is required.
+    TabDragFinished {
+        destination: Option<(WindowId, PhysicalPosition<f64>)>,
+        cancelled: bool,
+    },
     /// The activation token was delivered back and now could be used.
     #[cfg_attr(
         not(any(x11_platform, wayland_platform)),

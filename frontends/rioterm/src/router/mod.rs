@@ -689,7 +689,7 @@ impl Router<'_> {
         event_proxy: EventProxy,
         config: &RioConfig,
         app_id: Option<&str>,
-        position: PhysicalPosition<i32>,
+        position: Option<PhysicalPosition<i32>>,
     ) -> WindowId {
         let window = RouteWindow::from_target(
             event_loop,
@@ -702,7 +702,7 @@ impl Router<'_> {
             app_id,
             false,
             false,
-            Some(position),
+            position,
         );
         let id = window.winit_window.id().into();
         self.routes.insert(

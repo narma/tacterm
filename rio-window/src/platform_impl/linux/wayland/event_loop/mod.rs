@@ -479,6 +479,7 @@ impl<T: 'static> EventLoop<T> {
 
         // Collect the window ids
         self.with_state(|state| {
+            state.start_pending_tab_drags();
             window_ids.extend(state.window_requests.get_mut().keys());
         });
 

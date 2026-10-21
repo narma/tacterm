@@ -524,13 +524,18 @@ impl Island {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub fn drag_is_external(&self) -> bool {
+        self.drag.as_ref().is_some_and(|d| d.external)
+    }
+
     pub fn set_drag_external(&mut self, external: bool) {
         if let Some(drag) = &mut self.drag {
             drag.external = external;
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     pub fn drag_grab_offset(&self) -> Option<f32> {
         self.drag
             .as_ref()

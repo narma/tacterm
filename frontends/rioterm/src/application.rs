@@ -200,6 +200,10 @@ pub struct Application<'a> {
     scheduler: Scheduler,
     app_id: Option<String>,
     global_hotkey: Option<crate::global_hotkey::GlobalHotkeys>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    desktop_tab_drag: Option<crate::platform::tab_drag::DesktopDrag>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    native_tab_drag_source: Option<rio_backend::event::WindowId>,
     tab_drag_position: Option<(
         rio_backend::event::WindowId,
         rio_window::dpi::PhysicalPosition<f64>,
@@ -215,17 +219,34 @@ pub struct Application<'a> {
 }
 
 impl Application<'_> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     fn active_tab_drag_source(&self) -> Option<rio_backend::event::WindowId> {
         self.router.routes.iter().find_map(|(id, route)| {
             route.window.screen.tab_transfer_active().then_some(*id)
         })
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     fn cancel_tab_transfer(&mut self, source_id: rio_backend::event::WindowId) {
-        self.tab_drag_preview = None;
-        self.tab_drag_sample = None;
+        #[cfg(all(target_os = "linux", feature = "wayland"))]
+        if self.native_tab_drag_source == Some(source_id)
+            && self.desktop_tab_drag.is_none()
+        {
+            use rio_window::platform::wayland::WindowExtWayland;
+            if let Some(route) = self.router.routes.get(&source_id) {
+                route.window.winit_window.cancel_tab_drag();
+            }
+        }
+        #[cfg(windows)]
+        {
+            self.tab_drag_preview = None;
+            self.tab_drag_sample = None;
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            self.desktop_tab_drag = None;
+            self.native_tab_drag_source = None;
+        }
         self.tab_drag_position = None;
         if let Some(route) = self.router.routes.get_mut(&source_id) {
             route.window.screen.handle_tab_drag_release();
@@ -291,6 +312,225 @@ impl Application<'_> {
             .handle_tab_drag_move(position.x as f32 / scale, external);
         update_tab_drag_preview(&mut self.tab_drag_preview, source, position, external);
         source.request_redraw();
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn tab_destination(
+        &self,
+        id: rio_backend::event::WindowId,
+        point: rio_window::dpi::PhysicalPosition<f64>,
+    ) -> Option<(rio_backend::event::WindowId, usize)> {
+        let route = self.router.routes.get(&id)?;
+        let screen = &route.window.screen;
+        let scale = screen.sugarloaf.scale_factor() as f64;
+        if route.path != RoutePath::Terminal
+            || route.active_modal().is_some()
+            || !screen
+                .renderer
+                .navigation
+                .island_visible(screen.context_manager.len())
+            || point.x < 0.0
+            || point.y < 0.0
+            || point.x >= route.window.winit_window.inner_size().width as f64
+            || point.y > crate::renderer::island::ISLAND_HEIGHT as f64 * scale
+        {
+            return None;
+        }
+        Some((id, screen.tab_drop_index((point.x / scale) as f32)))
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn poll_desktop_tab_drag(&mut self, event_loop: &ActiveEventLoop, released: bool) {
+        let Some(source_id) = self.active_tab_drag_source() else {
+            self.desktop_tab_drag = None;
+            self.native_tab_drag_source = None;
+            return;
+        };
+        if self.native_tab_drag_source.is_none() {
+            let Some(route) = self.router.routes.get(&source_id) else {
+                return;
+            };
+            let screen = &route.window.screen;
+            let Some((width, grab)) = screen.tab_drag_preview_metrics() else {
+                return;
+            };
+            let Some(island) = screen.renderer.island.as_ref() else {
+                return;
+            };
+            let scale = screen.sugarloaf.scale_factor();
+            // Wayland should retain ordinary in-strip reordering until departure.
+            #[cfg(all(target_os = "linux", feature = "wayland"))]
+            {
+                use rio_window::platform::wayland::ActiveEventLoopExtWayland;
+                if event_loop.is_wayland()
+                    && !self.tab_drag_position.is_some_and(|(_, p)| {
+                        tab_left_strip(
+                            p.x,
+                            p.y,
+                            route.window.winit_window.inner_size().width as f64,
+                            scale as f64,
+                        )
+                    })
+                {
+                    return;
+                }
+            }
+            #[allow(unused_mut)]
+            let mut image_scale = scale;
+            #[cfg(all(target_os = "linux", feature = "wayland"))]
+            {
+                use rio_window::platform::wayland::ActiveEventLoopExtWayland;
+                if event_loop.is_wayland() {
+                    image_scale = scale.ceil();
+                }
+            }
+            #[allow(unused_mut)]
+            let mut pixel_width =
+                (width * image_scale).round().clamp(24.0, 4096.0) as u32;
+            #[allow(unused_mut)]
+            let mut pixel_height = (24.0 * image_scale).round().clamp(20.0, 256.0) as u32;
+            #[cfg(all(target_os = "linux", feature = "wayland"))]
+            {
+                use rio_window::platform::wayland::ActiveEventLoopExtWayland;
+                if event_loop.is_wayland() {
+                    pixel_width -= pixel_width % image_scale as u32;
+                    pixel_height -= pixel_height % image_scale as u32;
+                }
+            }
+            let Some(image) = rio_backend::sugarloaf::font::drag_image::render(
+                screen.sugarloaf.font_library(),
+                &screen.context_manager.displayed_title_for_current_tab(),
+                island.title_font_family.as_deref(),
+                island.title_font_size * image_scale,
+                pixel_width,
+                pixel_height,
+                screen
+                    .context_manager
+                    .current_grid()
+                    .custom_color
+                    .unwrap_or(screen.renderer.dynamic_background.0),
+                island.active_text_color,
+            ) else {
+                self.cancel_tab_transfer(source_id);
+                return;
+            };
+            match crate::platform::tab_drag::DesktopDrag::new(
+                &route.window.winit_window,
+                &image,
+                grab * image_scale,
+            ) {
+                Ok(Some(drag)) => self.desktop_tab_drag = Some(drag),
+                Ok(None) => {
+                    #[cfg(all(target_os = "linux", feature = "wayland"))]
+                    {
+                        use rio_window::platform::wayland::WindowExtWayland;
+                        let image = rio_window::window::TabDragImage {
+                            rgba: image.rgba,
+                            width: image.width,
+                            height: image.height,
+                            scale: image_scale.round().clamp(1.0, 8.0) as i32,
+                            grab_x: (grab * image_scale) as i32,
+                        };
+                        if let Err(error) =
+                            route.window.winit_window.start_tab_drag(image)
+                        {
+                            tracing::warn!("Could not start native tab drag: {error}");
+                            self.cancel_tab_transfer(source_id);
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("Could not create tab preview: {error}");
+                    self.cancel_tab_transfer(source_id);
+                    return;
+                }
+            }
+            self.native_tab_drag_source = Some(source_id);
+        }
+        let Some(drag) = self.desktop_tab_drag.as_mut() else {
+            return;
+        };
+        let Some(source) = self.router.routes.get_mut(&source_id) else {
+            return;
+        };
+        let pointer = match drag.sample(&source.window.winit_window) {
+            Ok(p) => p,
+            Err(error) => {
+                tracing::warn!("Could not track tab: {error}");
+                self.cancel_tab_transfer(source_id);
+                return;
+            }
+        };
+        if pointer.escape {
+            self.cancel_tab_transfer(source_id);
+            return;
+        }
+        if released || !pointer.down {
+            if let Err(error) = drag.show(false) {
+                tracing::warn!("Could not hide tab preview: {error}");
+            }
+            let drag = self.desktop_tab_drag.as_ref().unwrap();
+            let destination = self
+                .router
+                .routes
+                .iter()
+                .filter(|(id, _)| **id != source_id)
+                .find_map(|(id, route)| {
+                    drag.target_position(&route.window.winit_window)
+                        .and_then(|p| self.tab_destination(*id, p))
+                });
+            let source = &self.router.routes[&source_id];
+            let scale = source.window.screen.sugarloaf.scale_factor() as f64;
+            if !tab_drop_transfers(
+                destination.is_some(),
+                pointer.position.x,
+                pointer.position.y,
+                source.window.winit_window.inner_size().width as f64,
+                scale,
+            ) {
+                self.cancel_tab_transfer(source_id);
+                return;
+            }
+            let position = source.window.winit_window.inner_position().ok().map(|p| {
+                rio_window::dpi::PhysicalPosition::new(
+                    p.x + pointer.position.x as i32 - 80,
+                    p.y + pointer.position.y as i32 - 16,
+                )
+            });
+            if !self.transfer_tab(event_loop, source_id, destination, position) {
+                self.cancel_tab_transfer(source_id);
+            }
+            return;
+        }
+        let scale = source.window.screen.sugarloaf.scale_factor();
+        let external = !source.window.winit_window.has_focus()
+            || tab_left_strip(
+                pointer.position.x,
+                pointer.position.y,
+                source.window.winit_window.inner_size().width as f64,
+                scale as f64,
+            );
+        if self.tab_drag_position != Some((source_id, pointer.position))
+            || source
+                .window
+                .screen
+                .renderer
+                .island
+                .as_ref()
+                .is_some_and(|i| i.drag_is_external() != external)
+        {
+            self.tab_drag_position = Some((source_id, pointer.position));
+            source
+                .window
+                .screen
+                .handle_tab_drag_move(pointer.position.x as f32 / scale, external);
+            source.request_redraw();
+        }
+        if let Err(error) = drag.show(external) {
+            tracing::warn!("Could not move tab preview: {error}");
+            self.cancel_tab_transfer(source_id);
+        }
     }
 
     fn finish_tab_drag(
@@ -370,6 +610,35 @@ impl Application<'_> {
         ) {
             return false;
         }
+        self.transfer_tab(
+            event_loop,
+            source_id,
+            destination,
+            Some(rio_window::dpi::PhysicalPosition::new(
+                point.x - 80,
+                point.y - 16,
+            )),
+        )
+    }
+
+    fn transfer_tab(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        source_id: rio_backend::event::WindowId,
+        destination: Option<(rio_backend::event::WindowId, usize)>,
+        position: Option<rio_window::dpi::PhysicalPosition<i32>>,
+    ) -> bool {
+        let Some(source) = self.router.routes.get(&source_id) else {
+            return false;
+        };
+        if !source.window.screen.tab_transfer_active()
+            || source.path != RoutePath::Terminal
+            || source.active_modal().is_some()
+        {
+            return false;
+        }
+        let size = source.window.winit_window.inner_size();
+        let scale = source.window.screen.sugarloaf.scale_factor() as f64;
         let new_window = destination.is_none();
         let mut detached_config = self.config.clone();
         detached_config.window.mode = detached_window_mode(
@@ -384,7 +653,7 @@ impl Application<'_> {
                 self.event_proxy.clone(),
                 &detached_config,
                 self.app_id.as_deref(),
-                rio_window::dpi::PhysicalPosition::new(point.x - 80, point.y - 16),
+                position,
             );
             (id, 0)
         });
@@ -439,6 +708,11 @@ impl Application<'_> {
             }
         }
         self.tab_drag_position = None;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            self.desktop_tab_drag = None;
+            self.native_tab_drag_source = None;
+        }
         #[cfg(windows)]
         {
             self.tab_drag_sample = None;
@@ -484,6 +758,10 @@ impl Application<'_> {
             scheduler,
             app_id,
             global_hotkey: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            desktop_tab_drag: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            native_tab_drag_source: None,
             tab_drag_position: None,
             #[cfg(windows)]
             tab_drag_preview: None,
@@ -1622,6 +1900,51 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         // The event loop keys on rio-window's id; the router keys on the
         // core's `WindowId`. Convert once at this boundary.
         let window_id: rio_backend::event::WindowId = window_id.into();
+
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            if let WindowEvent::TabDragFinished {
+                destination,
+                cancelled,
+            } = &event
+            {
+                if self.native_tab_drag_source == Some(window_id) {
+                    let destination = destination
+                        .and_then(|(id, point)| self.tab_destination(id.into(), point));
+                    if *cancelled
+                        || !self.transfer_tab(event_loop, window_id, destination, None)
+                    {
+                        self.cancel_tab_transfer(window_id);
+                    }
+                }
+                return;
+            }
+            if let Some(source_id) = self.active_tab_drag_source() {
+                if matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed
+                    && event.logical_key == rio_window::keyboard::Key::Named(rio_window::keyboard::NamedKey::Escape))
+                {
+                    self.cancel_tab_transfer(source_id);
+                    return;
+                }
+                if self.native_tab_drag_source.is_some()
+                    && matches!(
+                        &event,
+                        WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. }
+                    )
+                {
+                    let released = matches!(
+                        &event,
+                        WindowEvent::MouseInput {
+                            state: ElementState::Released,
+                            button: MouseButton::Left,
+                            ..
+                        }
+                    );
+                    self.poll_desktop_tab_drag(event_loop, released);
+                    return;
+                }
+            }
+        }
 
         #[cfg(windows)]
         if let Some(source_id) = self.active_tab_drag_source() {
@@ -2843,6 +3166,8 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(windows)]
         self.poll_tab_transfer(event_loop, false);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        self.poll_desktop_tab_drag(event_loop, false);
         #[cfg(windows)]
         if !self
             .tab_drag_position
@@ -2874,6 +3199,18 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         };
         #[cfg(windows)]
         let control_flow = if self.active_tab_drag_source().is_some() {
+            let next = Instant::now() + Duration::from_millis(16);
+            match control_flow {
+                ControlFlow::WaitUntil(deadline) => {
+                    ControlFlow::WaitUntil(deadline.min(next))
+                }
+                _ => ControlFlow::WaitUntil(next),
+            }
+        } else {
+            control_flow
+        };
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let control_flow = if self.desktop_tab_drag.is_some() {
             let next = Instant::now() + Duration::from_millis(16);
             match control_flow {
                 ControlFlow::WaitUntil(deadline) => {
