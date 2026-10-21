@@ -33,6 +33,7 @@ env:
 jobs:
   test-native:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
 
@@ -45,7 +46,7 @@ jobs:
       - run: rustup component add rustfmt clippy
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update -yq && sudo apt-get install -yq libasound2-dev libfontconfig1-dev glslang-tools xvfb
+        run: sudo apt-get update -yq && sudo apt-get install -yq libasound2-dev libfontconfig1-dev glslang-tools xvfb libxkbcommon-x11-dev
       - run: cargo fetch
       - name: cargo fmt
         # Formatting is platform-independent; once is enough.
