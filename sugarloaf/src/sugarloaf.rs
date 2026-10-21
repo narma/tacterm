@@ -881,6 +881,22 @@ impl Sugarloaf<'_> {
         self.renderer.evict_route_textures(route_id);
     }
 
+    /// Move CPU image data with its terminal; destination GPU textures rebuild on demand.
+    pub fn transfer_route_images(&mut self, route_id: usize, destination: &mut Self) {
+        let keys: Vec<_> = self
+            .image_data
+            .keys()
+            .copied()
+            .filter(|key| image_key_route(*key) == route_id)
+            .collect();
+        for key in keys {
+            if let Some(data) = self.image_data.remove(&key) {
+                destination.image_data.insert(key, data);
+            }
+        }
+        self.renderer.evict_route_textures(route_id);
+    }
+
     /// Drop everything this frame's immediate-mode producers pushed
     /// without submitting a draw. Callers use this when they
     /// decided mid-frame to skip `render` / `render_with_grids`

@@ -30,6 +30,165 @@ use rio_window::window::{CursorIcon, Fullscreen};
 use std::error::Error;
 use std::time::{Duration, Instant};
 
+fn tab_left_strip(x: f64, y: f64, width: f64, scale: f64) -> bool {
+    // A small dead band prevents accidental detach while reordering near an edge.
+    let tolerance = 12.0 * scale;
+    x < -tolerance
+        || x > width + tolerance
+        || y < -tolerance
+        || y > (crate::renderer::island::ISLAND_HEIGHT as f64 * scale) + tolerance
+}
+
+fn tab_drop_transfers(
+    has_destination: bool,
+    x: f64,
+    y: f64,
+    width: f64,
+    scale: f64,
+) -> bool {
+    // Maximized windows share strip coordinates; a visible destination takes
+    // precedence over the source's detach threshold.
+    has_destination || tab_left_strip(x, y, width, scale)
+}
+
+fn detached_window_mode(
+    fullscreen: bool,
+    maximized: bool,
+) -> rio_backend::config::window::WindowMode {
+    use rio_backend::config::window::WindowMode;
+    if fullscreen {
+        WindowMode::Fullscreen
+    } else if maximized {
+        WindowMode::Maximized
+    } else {
+        WindowMode::Windowed
+    }
+}
+
+#[cfg(windows)]
+fn update_tab_drag_preview(
+    preview: &mut Option<std::io::Result<crate::platform::windows::TabDragPreview>>,
+    route: &mut crate::router::Route<'_>,
+    position: rio_window::dpi::PhysicalPosition<f64>,
+    external: bool,
+) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Foundation::{HWND, POINT};
+    let screen = &mut route.window.screen;
+    if !external || !screen.tab_transfer_active() {
+        *preview = None;
+        return;
+    }
+    let Ok(origin) = route.window.winit_window.inner_position() else {
+        return;
+    };
+    let point = POINT {
+        x: origin.x.saturating_add(position.x as i32),
+        y: origin.y.saturating_add(position.y as i32),
+    };
+    if preview.is_none() {
+        let result = (|| {
+            let handle = route
+                .window
+                .winit_window
+                .window_handle()
+                .map_err(std::io::Error::other)?;
+            let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+                return Err(std::io::Error::other(
+                    "drag preview requires a Windows window",
+                ));
+            };
+            let (width, grab) = screen
+                .tab_drag_preview_metrics()
+                .ok_or_else(|| std::io::Error::other("tab drag is no longer active"))?;
+            let island = screen
+                .renderer
+                .island
+                .as_ref()
+                .ok_or_else(|| std::io::Error::other("tab strip is hidden"))?;
+            let background = screen
+                .context_manager
+                .current_grid()
+                .custom_color
+                .unwrap_or_else(|| {
+                    let color = screen.renderer.dynamic_background.0;
+                    [
+                        (color[0] + 0.08).min(1.0),
+                        (color[1] + 0.08).min(1.0),
+                        (color[2] + 0.08).min(1.0),
+                        1.0,
+                    ]
+                });
+            crate::platform::windows::TabDragPreview::new(
+                handle.hwnd.get() as HWND,
+                &screen.context_manager.displayed_title_for_current_tab(),
+                width,
+                grab,
+                screen.sugarloaf.scale_factor(),
+                island.title_font_family.as_deref(),
+                island.title_font_size,
+                background,
+                island.active_text_color,
+                point,
+            )
+        })();
+        if let Err(error) = &result {
+            tracing::warn!("Could not create tab drag preview: {error}");
+        }
+        *preview = Some(result);
+    }
+    if let Some(Ok(image)) = preview {
+        if let Err(error) = image.move_to(point) {
+            tracing::warn!("Could not move tab drag preview: {error}");
+            *preview = Some(Err(error));
+        }
+    }
+    if matches!(preview, Some(Err(_))) {
+        // Keep the in-window feedback if the desktop compositor rejects the image.
+        if let Some(island) = &mut screen.renderer.island {
+            island.set_drag_external(false);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tab_transfer_tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_maximized_strips_accept_transfer_after_focus_switch() {
+        for scale in [1.0, 1.25, 2.0] {
+            let (x, y, width) = (120.0 * scale, 16.0 * scale, 1920.0 * scale);
+            assert!(tab_drop_transfers(true, x, y, width, scale));
+            assert!(!tab_drop_transfers(false, x, y, width, scale));
+            assert!(tab_drop_transfers(false, x, 100.0 * scale, width, scale));
+        }
+    }
+
+    #[test]
+    fn detached_window_inherits_live_parent_state() {
+        use rio_backend::config::window::WindowMode;
+        assert_eq!(detached_window_mode(false, false), WindowMode::Windowed);
+        assert_eq!(detached_window_mode(false, true), WindowMode::Maximized);
+        assert_eq!(detached_window_mode(true, true), WindowMode::Fullscreen);
+        assert_eq!(detached_window_mode(true, false), WindowMode::Fullscreen);
+    }
+
+    #[test]
+    fn tab_detach_threshold_scales_with_dpi() {
+        for scale in [1.0, 1.25, 2.0] {
+            let width = 800.0 * scale;
+            let bottom = crate::renderer::island::ISLAND_HEIGHT as f64 * scale;
+            assert!(!tab_left_strip(100.0, bottom + 10.0 * scale, width, scale));
+            assert!(tab_left_strip(100.0, bottom + 13.0 * scale, width, scale));
+            assert!(!tab_left_strip(-10.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(-13.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(width + 13.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(100.0, -13.0 * scale, width, scale));
+        }
+    }
+}
+
 pub struct Application<'a> {
     config: rio_backend::config::Config,
     /// The title template shows `{{columns}}`/`{{lines}}`, so a resize
@@ -41,6 +200,14 @@ pub struct Application<'a> {
     scheduler: Scheduler,
     app_id: Option<String>,
     global_hotkey: Option<crate::global_hotkey::GlobalHotkeys>,
+    tab_drag_position: Option<(
+        rio_backend::event::WindowId,
+        rio_window::dpi::PhysicalPosition<f64>,
+    )>,
+    #[cfg(windows)]
+    tab_drag_preview: Option<std::io::Result<crate::platform::windows::TabDragPreview>>,
+    #[cfg(windows)]
+    tab_drag_sample: Option<(rio_backend::event::WindowId, i32, i32, bool)>,
     /// Frontmost app when the quake window was shown, re-activated
     /// when it hides so focus returns where the user was.
     #[cfg(target_os = "macos")]
@@ -48,6 +215,237 @@ pub struct Application<'a> {
 }
 
 impl Application<'_> {
+    #[cfg(windows)]
+    fn active_tab_drag_source(&self) -> Option<rio_backend::event::WindowId> {
+        self.router.routes.iter().find_map(|(id, route)| {
+            route.window.screen.tab_transfer_active().then_some(*id)
+        })
+    }
+
+    #[cfg(windows)]
+    fn cancel_tab_transfer(&mut self, source_id: rio_backend::event::WindowId) {
+        self.tab_drag_preview = None;
+        self.tab_drag_sample = None;
+        self.tab_drag_position = None;
+        if let Some(route) = self.router.routes.get_mut(&source_id) {
+            route.window.screen.handle_tab_drag_release();
+            route.window.screen.mouse.left_button_state = ElementState::Released;
+            route.request_redraw();
+        }
+    }
+
+    // Capture can be revoked by Alt+Tab. Poll only during a started gesture so
+    // movement and release still belong to the source after focus changes.
+    #[cfg(windows)]
+    fn poll_tab_transfer(&mut self, event_loop: &ActiveEventLoop, released: bool) {
+        let Some(source_id) = self.active_tab_drag_source() else {
+            return;
+        };
+        let state = match crate::platform::windows::tab_drag_pointer() {
+            Ok(state) => state,
+            Err(error) => {
+                tracing::warn!("Could not track tab drag: {error}");
+                self.cancel_tab_transfer(source_id);
+                return;
+            }
+        };
+        if state.escape {
+            self.cancel_tab_transfer(source_id);
+            return;
+        }
+        let Some(source) = self.router.routes.get_mut(&source_id) else {
+            return;
+        };
+        let Ok(origin) = source.window.winit_window.inner_position() else {
+            self.cancel_tab_transfer(source_id);
+            return;
+        };
+        let position = rio_window::dpi::PhysicalPosition::new(
+            (state.position.x - origin.x) as f64,
+            (state.position.y - origin.y) as f64,
+        );
+        self.tab_drag_position = Some((source_id, position));
+        if released || !state.left_down {
+            self.tab_drag_preview = None;
+            if !self.finish_tab_drag(event_loop, source_id) {
+                self.cancel_tab_transfer(source_id);
+            }
+            return;
+        }
+        let scale = source.window.screen.sugarloaf.scale_factor();
+        let external = !source.window.winit_window.has_focus()
+            || tab_left_strip(
+                position.x,
+                position.y,
+                source.window.winit_window.inner_size().width as f64,
+                scale as f64,
+            );
+        let sample = (source_id, state.position.x, state.position.y, external);
+        if self.tab_drag_sample == Some(sample) {
+            return;
+        }
+        self.tab_drag_sample = Some(sample);
+        source
+            .window
+            .screen
+            .handle_tab_drag_move(position.x as f32 / scale, external);
+        update_tab_drag_preview(&mut self.tab_drag_preview, source, position, external);
+        source.request_redraw();
+    }
+
+    fn finish_tab_drag(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        source_id: rio_backend::event::WindowId,
+    ) -> bool {
+        let Some((position_window, position)) = self.tab_drag_position else {
+            return false;
+        };
+        if position_window != source_id {
+            return false;
+        }
+        let Some(source) = self.router.routes.get(&source_id) else {
+            return false;
+        };
+        let screen = &source.window.screen;
+        if source.path != RoutePath::Terminal
+            || source.active_modal().is_some()
+            || !screen.tab_transfer_active()
+        {
+            return false;
+        }
+        let scale = screen.sugarloaf.scale_factor() as f64;
+        let size = source.window.winit_window.inner_size();
+        let Ok(origin) = source.window.winit_window.inner_position() else {
+            return false;
+        };
+        let point = rio_window::dpi::PhysicalPosition::new(
+            origin.x + position.x as i32,
+            origin.y + position.y as i32,
+        );
+
+        // Windows mouse capture keeps delivering moves to the source. Query the
+        // actual topmost window so an obscured tab strip cannot receive a drop.
+        #[cfg(windows)]
+        // SAFETY: Both functions only inspect the window tree; POINT is passed
+        // by value and GetAncestor accepts the null result of WindowFromPoint.
+        let under_pointer = unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GetAncestor, WindowFromPoint, GA_ROOT,
+            };
+            GetAncestor(
+                WindowFromPoint(windows_sys::Win32::Foundation::POINT {
+                    x: point.x,
+                    y: point.y,
+                }),
+                GA_ROOT,
+            )
+        };
+        let destination = self.router.routes.iter().find_map(|(id, route)| {
+            if *id == source_id || route.path != RoutePath::Terminal
+                || !route.window.screen.renderer.navigation.island_visible(route.window.screen.context_manager.len())
+                || route.active_modal().is_some()
+                || route.window.winit_window.is_visible() == Some(false)
+                || route.window.winit_window.is_minimized() == Some(true) { return None; }
+            #[cfg(windows)]
+            {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                let Ok(handle) = route.window.winit_window.window_handle() else { return None; };
+                if !matches!(handle.as_raw(), RawWindowHandle::Win32(handle) if handle.hwnd.get() as windows_sys::Win32::Foundation::HWND == under_pointer) { return None; }
+            }
+            let origin = route.window.winit_window.inner_position().ok()?;
+            let x = (point.x - origin.x) as f64;
+            let y = (point.y - origin.y) as f64;
+            let scale = route.window.screen.sugarloaf.scale_factor() as f64;
+            if x < 0.0 || x >= route.window.winit_window.inner_size().width as f64
+                || y < 0.0 || y > crate::renderer::island::ISLAND_HEIGHT as f64 * scale { return None; }
+            Some((*id, route.window.screen.tab_drop_index((x / scale) as f32)))
+        });
+        if !tab_drop_transfers(
+            destination.is_some(),
+            position.x,
+            position.y,
+            size.width as f64,
+            scale,
+        ) {
+            return false;
+        }
+        let new_window = destination.is_none();
+        let mut detached_config = self.config.clone();
+        detached_config.window.mode = detached_window_mode(
+            source.window.winit_window.fullscreen().is_some(),
+            source.window.winit_window.is_maximized(),
+        );
+        detached_config.window.width = (size.width as f64 / scale).round() as i32;
+        detached_config.window.height = (size.height as f64 / scale).round() as i32;
+        let (destination_id, index) = destination.unwrap_or_else(|| {
+            let id = self.router.create_transfer_window(
+                event_loop,
+                self.event_proxy.clone(),
+                &detached_config,
+                self.app_id.as_deref(),
+                rio_window::dpi::PhysicalPosition::new(point.x - 80, point.y - 16),
+            );
+            (id, 0)
+        });
+        let Some(mut source) = self.router.routes.remove(&source_id) else {
+            return false;
+        };
+        let Some(destination) = self.router.routes.get_mut(&destination_id) else {
+            self.router.routes.insert(source_id, source);
+            return false;
+        };
+        let source_screen = &mut source.window.screen;
+        source_screen.cancel_search(&mut self.router.clipboard);
+        let tab = source_screen.context_manager.take_current_tab();
+        let target_screen = &mut destination.window.screen;
+        target_screen.cancel_search(&mut self.router.clipboard);
+        if new_window {
+            drop(target_screen.context_manager.take_current_tab());
+        }
+        for item in tab.contexts().values() {
+            source_screen.grids.remove(&item.val.route_id);
+            source_screen
+                .sugarloaf
+                .clear_image_overlays_for(item.val.rich_text_id);
+            source_screen
+                .sugarloaf
+                .transfer_route_images(item.val.route_id, &mut target_screen.sugarloaf);
+            self.scheduler
+                .unschedule(TimerId::new(Topic::SelectionScrolling, item.val.route_id));
+            self.scheduler
+                .unschedule(TimerId::new(Topic::CursorBlinking, item.val.route_id));
+            self.scheduler
+                .unschedule(TimerId::new(Topic::RenderRoute, item.val.route_id));
+            self.scheduler
+                .unschedule(TimerId::new(Topic::ScheduledRenderRoute, item.val.route_id));
+        }
+        target_screen.context_manager.insert_tab(tab, index);
+        target_screen.finish_tab_transfer(destination.window.winit_window.inner_size());
+        destination.sync_window_title();
+        destination.window.winit_window.focus_window();
+        destination.request_redraw();
+        if source_screen.context_manager.len() > 0 {
+            source_screen.finish_tab_transfer(source.window.winit_window.inner_size());
+            source.sync_window_title();
+            source.request_redraw();
+            self.router.routes.insert(source_id, source);
+        } else {
+            if self.router.quake_window_id == Some(source_id) {
+                self.router.quake_window_id = None;
+            }
+            if self.router.config_route == Some(source_id) {
+                self.router.config_route = None;
+            }
+        }
+        self.tab_drag_position = None;
+        #[cfg(windows)]
+        {
+            self.tab_drag_sample = None;
+        }
+        true
+    }
+
     pub fn new<'app>(
         config: rio_backend::config::Config,
         config_error: Option<rio_backend::config::ConfigError>,
@@ -86,6 +484,11 @@ impl Application<'_> {
             scheduler,
             app_id,
             global_hotkey: None,
+            tab_drag_position: None,
+            #[cfg(windows)]
+            tab_drag_preview: None,
+            #[cfg(windows)]
+            tab_drag_sample: None,
             #[cfg(target_os = "macos")]
             quake_previous_app: None,
         }
@@ -376,7 +779,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: EventPayload) {
-        let window_id = event.window_id;
+        let window_id = event.resolved_window_id();
         match event.payload {
             RioEventType::Rio(RioEvent::Render) => {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
@@ -1220,10 +1623,81 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         // core's `WindowId`. Convert once at this boundary.
         let window_id: rio_backend::event::WindowId = window_id.into();
 
+        #[cfg(windows)]
+        if let Some(source_id) = self.active_tab_drag_source() {
+            if matches!(&event, WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
+                    && event.logical_key == rio_window::keyboard::Key::Named(rio_window::keyboard::NamedKey::Escape))
+            {
+                self.cancel_tab_transfer(source_id);
+                return;
+            }
+            if matches!(
+                &event,
+                WindowEvent::CursorMoved { .. } | WindowEvent::MouseInput { .. }
+            ) {
+                let released = matches!(
+                    &event,
+                    WindowEvent::MouseInput {
+                        state: ElementState::Released,
+                        button: MouseButton::Left,
+                        ..
+                    }
+                );
+                self.poll_tab_transfer(event_loop, released);
+                return;
+            }
+        }
+
+        #[cfg(windows)]
+        if matches!(
+            &event,
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } | WindowEvent::CloseRequested
+        ) || matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed
+                && event.logical_key == rio_window::keyboard::Key::Named(rio_window::keyboard::NamedKey::Escape))
+        {
+            // Remove the click-through image before choosing the drop target.
+            self.tab_drag_preview = None;
+        }
+
+        if let WindowEvent::CursorMoved { position, .. } = &event {
+            self.tab_drag_position = Some((window_id, *position));
+        }
+        if matches!(
+            &event,
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            }
+        ) && self.finish_tab_drag(event_loop, window_id)
+        {
+            return;
+        }
+
         let route = match self.router.routes.get_mut(&window_id) {
             Some(window) => window,
             None => return,
         };
+
+        if matches!(&event, WindowEvent::KeyboardInput { event, .. }
+            if event.state == ElementState::Pressed
+                && event.logical_key == rio_window::keyboard::Key::Named(rio_window::keyboard::NamedKey::Escape))
+        {
+            if let Some(island) = &mut route.window.screen.renderer.island {
+                if island.is_dragging() {
+                    island.cancel_drag();
+                    route.window.screen.mouse.left_button_state = ElementState::Released;
+                    self.tab_drag_position = None;
+                    route.request_redraw();
+                    return;
+                }
+            }
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -1779,7 +2253,28 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         .is_some_and(|i| i.is_dragging())
                 {
                     let scale = route.window.screen.sugarloaf.scale_factor();
-                    route.window.screen.handle_tab_drag_move(x as f32 / scale);
+                    let external = tab_left_strip(
+                        position.x,
+                        position.y,
+                        layout.width as f64,
+                        scale as f64,
+                    );
+                    if external {
+                        if let Some(island) = &mut route.window.screen.renderer.island {
+                            island.activate_drag();
+                        }
+                    }
+                    route
+                        .window
+                        .screen
+                        .handle_tab_drag_move(position.x as f32 / scale, external);
+                    #[cfg(windows)]
+                    update_tab_drag_preview(
+                        &mut self.tab_drag_preview,
+                        route,
+                        position,
+                        external,
+                    );
                     route.window.winit_window.set_cursor(CursorIcon::Default);
                     route.request_redraw();
                     return;
@@ -2346,6 +2841,20 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(windows)]
+        self.poll_tab_transfer(event_loop, false);
+        #[cfg(windows)]
+        if !self
+            .tab_drag_position
+            .and_then(|(id, _)| self.router.routes.get(&id))
+            .is_some_and(|route| {
+                route.window.screen.tab_transfer_active()
+                    && route.window.screen.mouse.left_button_state
+                        == ElementState::Pressed
+            })
+        {
+            self.tab_drag_preview = None;
+        }
         // A confirmed quit can be set from any input path (keys today,
         // a future mouse or menu handler tomorrow); honoring it here,
         // once per event batch, keeps the exit independent of which
@@ -2362,6 +2871,18 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         let control_flow = match self.scheduler.update() {
             Some(instant) => ControlFlow::WaitUntil(instant),
             None => ControlFlow::Wait,
+        };
+        #[cfg(windows)]
+        let control_flow = if self.active_tab_drag_source().is_some() {
+            let next = Instant::now() + Duration::from_millis(16);
+            match control_flow {
+                ControlFlow::WaitUntil(deadline) => {
+                    ControlFlow::WaitUntil(deadline.min(next))
+                }
+                _ => ControlFlow::WaitUntil(next),
+            }
+        } else {
+            control_flow
         };
         event_loop.set_control_flow(control_flow);
     }
@@ -2415,6 +2936,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     // This is irreversible - if this event is emitted, it is guaranteed to be the last event that gets emitted.
     // You generally want to treat this as an “do on quit” event.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(windows)]
+        {
+            self.tab_drag_preview = None;
+        }
         // Ensure that all the windows are dropped, so the destructors for
         // Renderer and contexts ran.
         self.router.routes.clear();

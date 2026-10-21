@@ -285,3 +285,31 @@ pub fn configure_window(winit_window: &Window, config: &Config) {
 
     winit_window.set_blur(config.window.blur.into());
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use rio_window::event_loop::EventLoop;
+    use rio_window::platform::windows::EventLoopBuilderExtWindows;
+
+    #[test]
+    #[allow(deprecated)]
+    fn positioned_borderless_window_stays_maximized() {
+        let mut config = Config::default();
+        config.window.mode = WindowMode::Maximized;
+        config.window.decorations = Decorations::Disabled;
+        let mut event_loop_builder = EventLoop::builder();
+        event_loop_builder.with_any_thread(true);
+        let event_loop = event_loop_builder.build().unwrap();
+        // A hidden native window checks the startup sequence without spawning
+        // a terminal session, taking focus, or drawing on the user's desktop.
+        let attributes =
+            create_window_builder("tab transfer test", &config, None, None, false)
+                .with_visible(false)
+                .with_position(rio_window::dpi::PhysicalPosition::new(100, 100));
+        let window = event_loop.create_window(attributes).unwrap();
+        assert!(window.is_maximized());
+        assert!(!window.is_decorated());
+        assert_eq!(config.window.mode, WindowMode::Maximized);
+    }
+}

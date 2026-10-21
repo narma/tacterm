@@ -103,6 +103,7 @@ pub struct Screen<'screen> {
     pub allow_manual_dragging: bool,
     last_chrome_press: Option<ChromePress>,
     last_close_press: Option<(std::time::Instant, f32)>,
+    tab_drag_route_id: Option<usize>,
     pub grids: rustc_hash::FxHashMap<usize, rio_backend::sugarloaf::grid::GridRenderer>,
     pub grid_rasterizer: rio_grid::GridGlyphRasterizer,
 }
@@ -142,6 +143,7 @@ impl Screen<'_> {
         event_proxy: EventProxy,
         font_library: &rio_backend::sugarloaf::font::FontLibrary,
         open_url: Option<String>,
+        spawn_shell: bool,
     ) -> Result<Screen<'screen>, Box<dyn Error>> {
         let size = window_properties.size;
         let scale = window_properties.scale;
@@ -299,18 +301,42 @@ impl Screen<'_> {
             state: CursorState::new(config.cursor.shape.into()),
         };
 
-        let context_manager = context::ContextManager::start(
-            // config.cursor.blinking
-            (&cursor, config.cursor.blinking),
-            event_proxy,
-            window_id.into(),
-            0,
-            rich_text_id,
-            context_manager_config,
-            context_dimension,
-            scaled_margin,
-            sugarloaf_errors,
-        )?;
+        let context_manager = if spawn_shell {
+            context::ContextManager::start(
+                // config.cursor.blinking
+                (&cursor, config.cursor.blinking),
+                event_proxy,
+                window_id.into(),
+                0,
+                rich_text_id,
+                context_manager_config,
+                context_dimension,
+                scaled_margin,
+                sugarloaf_errors,
+            )?
+        } else {
+            // A transfer destination is prepared before the source is touched.
+            // Its placeholder must never spawn a second shell.
+            let tab = context::ContextGrid::new(
+                context::create_dead_context(
+                    event_proxy.clone(),
+                    window_id.into(),
+                    0,
+                    rich_text_id,
+                    context_dimension,
+                ),
+                scaled_margin,
+                context_manager_config.split_color,
+                context_manager_config.split_active_color,
+                context_manager_config.panel,
+            );
+            context::ContextManager::from_tab(
+                tab,
+                event_proxy,
+                window_id.into(),
+                context_manager_config,
+            )
+        };
 
         sugarloaf.set_window_opaque(window_should_be_opaque(config));
         sugarloaf.set_background_color(Some(renderer.dynamic_background.1));
@@ -353,6 +379,7 @@ impl Screen<'_> {
             allow_manual_dragging: config.navigation.is_enabled(),
             last_chrome_press: None,
             last_close_press: None,
+            tab_drag_route_id: None,
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: rio_grid::GridGlyphRasterizer::new(),
         })
@@ -3048,12 +3075,13 @@ impl Screen<'_> {
             return true;
         }
 
-        if num_tabs == 1 {
+        if num_tabs == 1 && matches!(self.mouse.click_state, ClickState::DoubleClick) {
             self.on_chrome_press(window, chrome_press);
             return true;
         }
 
-        if clicked_tab == self.context_manager.current_index()
+        if num_tabs > 1
+            && clicked_tab == self.context_manager.current_index()
             && island::close_button_hit(&layout, clicked_tab, mouse_x_unscaled)
         {
             self.stop_hint_mode_if_active();
@@ -3089,7 +3117,8 @@ impl Screen<'_> {
         let can_reorder = self.allow_manual_dragging;
         #[cfg(not(target_os = "macos"))]
         let can_reorder = true;
-        if num_tabs > 1 && can_reorder {
+        if can_reorder {
+            self.tab_drag_route_id = Some(self.context_manager.current_route());
             if let Some(ref mut island) = self.renderer.island {
                 let tab_left = layout.left_margin + clicked_tab as f32 * layout.tab_width;
                 island.start_drag(
@@ -3103,11 +3132,11 @@ impl Screen<'_> {
         true
     }
 
-    pub fn handle_tab_drag_move(&mut self, x_unscaled: f32) {
+    pub fn handle_tab_drag_move(&mut self, x_unscaled: f32, external: bool) {
         let num_tabs = self.context_manager.len();
 
         // A tab closed mid-drag invalidates the armed indices.
-        if num_tabs < 2 {
+        if num_tabs == 0 {
             if let Some(ref mut island) = self.renderer.island {
                 island.cancel_drag();
             }
@@ -3118,6 +3147,7 @@ impl Screen<'_> {
 
         let (drag_idx, center) = match self.renderer.island.as_mut() {
             Some(island) => {
+                island.set_drag_external(external && cfg!(windows));
                 if !island.update_drag(x_unscaled) {
                     // armed but still below the drag threshold
                     return;
@@ -3131,10 +3161,17 @@ impl Screen<'_> {
         };
 
         let old_index = self.context_manager.current_index();
-        if drag_idx != old_index {
+        if drag_idx != old_index
+            || self.tab_drag_route_id != Some(self.context_manager.current_route())
+        {
             if let Some(ref mut island) = self.renderer.island {
                 island.cancel_drag();
             }
+            self.mark_dirty();
+            return;
+        }
+
+        if external {
             self.mark_dirty();
             return;
         }
@@ -3169,6 +3206,50 @@ impl Screen<'_> {
             return started;
         }
         false
+    }
+
+    pub fn tab_drop_index(&self, x: f32) -> usize {
+        let layout = self.island_tab_layout(self.context_manager.len());
+        (((x - layout.left_margin).max(0.0) / layout.tab_width) as usize)
+            .min(self.context_manager.len())
+    }
+
+    pub fn tab_transfer_active(&self) -> bool {
+        self.tab_drag_route_id == Some(self.context_manager.current_route())
+            && self.renderer.island.as_ref().is_some_and(|island| {
+                island.drag_index() == Some(self.context_manager.current_index())
+            })
+    }
+
+    #[cfg(windows)]
+    pub fn tab_drag_preview_metrics(&self) -> Option<(f32, f32)> {
+        let layout = self.island_tab_layout(self.context_manager.len());
+        let width = (layout.tab_width - 6.0).max(24.0);
+        let grab = if self.context_manager.len() == 1 {
+            width / 2.0
+        } else {
+            self.renderer.island.as_ref()?.drag_grab_offset()? - 3.0
+        };
+        Some((width, grab.clamp(0.0, width)))
+    }
+
+    pub fn finish_tab_transfer(&mut self, size: rio_window::dpi::PhysicalSize<u32>) {
+        if let Some(island) = &mut self.renderer.island {
+            island.cancel_drag();
+        }
+        self.tab_drag_route_id = None;
+        self.stop_hint_mode_if_active();
+        self.clear_highlighted_hint();
+        self.resize_state = None;
+        self.renderer.scrollbar.end_drag();
+        self.ime.set_preedit(None);
+        self.mouse.left_button_state = ElementState::Released;
+        self.set_scale(self.sugarloaf.scale_factor(), size);
+        self.resize_top_or_bottom_line(self.context_manager.len());
+        self.resize_all_contexts();
+        self.context_manager
+            .keep_only_active_context_visible(&mut self.sugarloaf);
+        self.mark_dirty();
     }
 
     #[inline]
@@ -3282,7 +3363,7 @@ impl Screen<'_> {
     }
 
     #[inline]
-    fn cancel_search(&mut self, clipboard: &mut Clipboard) {
+    pub(crate) fn cancel_search(&mut self, clipboard: &mut Clipboard) {
         if self.get_mode().contains(Mode::VI) {
             // Recover pre-search state in vi mode.
             self.search_reset_state();
@@ -3591,13 +3672,17 @@ impl Screen<'_> {
             rc.pending_update
                 .set_terminal_damage(rio_backend::event::TerminalDamage::CursorOnly);
 
-            if let Some(ref mut island) = self.renderer.island {
-                if island.is_dragging() {
-                    island.cancel_drag();
-                    self.mark_dirty();
+            // Windows tracks a started tab transfer across Alt+Tab independently
+            // of native mouse capture. Ordinary clicks still reset on blur.
+            if !(cfg!(windows) && self.tab_transfer_active()) {
+                if let Some(ref mut island) = self.renderer.island {
+                    if island.is_dragging() {
+                        island.cancel_drag();
+                        self.mark_dirty();
+                    }
                 }
+                self.mouse.left_button_state = ElementState::Released;
             }
-            self.mouse.left_button_state = ElementState::Released;
         }
 
         if self.get_mode().contains(Mode::FOCUS_IN_OUT) {

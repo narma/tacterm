@@ -596,6 +596,8 @@ impl Router<'_> {
             None,
             None,
             false,
+            true,
+            None,
         );
         let id: WindowId = window.winit_window.id().into();
         let route = Route::new(Assistant::new(), RoutePath::Terminal, window);
@@ -660,6 +662,8 @@ impl Router<'_> {
             open_url,
             app_id,
             false,
+            true,
+            None,
         );
         let id: WindowId = window.winit_window.id().into();
 
@@ -676,6 +680,36 @@ impl Router<'_> {
         }
 
         self.routes.insert(id, route);
+    }
+
+    /// Prepare a destination without spawning a throwaway shell.
+    pub fn create_transfer_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        event_proxy: EventProxy,
+        config: &RioConfig,
+        app_id: Option<&str>,
+        position: PhysicalPosition<i32>,
+    ) -> WindowId {
+        let window = RouteWindow::from_target(
+            event_loop,
+            event_proxy,
+            config,
+            &self.font_library,
+            RIO_TITLE,
+            None,
+            None,
+            app_id,
+            false,
+            false,
+            Some(position),
+        );
+        let id = window.winit_window.id().into();
+        self.routes.insert(
+            id,
+            Route::new(Assistant::new(), RoutePath::Terminal, window),
+        );
+        id
     }
 
     /// Create the quake dropdown window: borderless, always on top,
@@ -697,6 +731,8 @@ impl Router<'_> {
             None,
             None,
             true,
+            true,
+            None,
         );
         let id: WindowId = window.winit_window.id().into();
         self.routes.insert(
@@ -731,6 +767,8 @@ impl Router<'_> {
             open_url,
             None,
             false,
+            true,
+            None,
         );
         self.routes.insert(
             window.winit_window.id().into(),
@@ -873,10 +911,17 @@ impl<'a> RouteWindow<'a> {
         open_url: Option<String>,
         app_id: Option<&str>,
         quake: bool,
+        spawn_shell: bool,
+        initial_position: Option<PhysicalPosition<i32>>,
     ) -> RouteWindow<'a> {
         #[allow(unused_mut)]
         let mut window_builder =
             create_window_builder(window_name, config, tab_id, app_id, quake);
+        if let Some(position) = initial_position {
+            // Position at creation: set_outer_position restores maximized
+            // Windows windows, even when the caller only wants another monitor.
+            window_builder = window_builder.with_position(position);
+        }
 
         // The quake window starts hidden; the caller anchors it to the
         // monitor under the cursor and shows it (position changes on
@@ -905,11 +950,19 @@ impl<'a> RouteWindow<'a> {
             window_id: winit_window.id(),
         };
 
-        let mut screen =
-            Screen::new(properties, config, event_proxy, font_library, open_url)
-                .expect("Screen not created");
+        let mut screen = Screen::new(
+            properties,
+            config,
+            event_proxy,
+            font_library,
+            open_url,
+            spawn_shell,
+        )
+        .expect("Screen not created");
 
-        if config.window.columns.is_some() || config.window.rows.is_some() {
+        if spawn_shell
+            && (config.window.columns.is_some() || config.window.rows.is_some())
+        {
             let (physical_width, physical_height) = compute_window_size_from_grid(
                 config.window.columns,
                 config.window.rows,

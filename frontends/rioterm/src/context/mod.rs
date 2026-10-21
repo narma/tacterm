@@ -45,6 +45,7 @@ use teletypewriter::create_pty;
 use teletypewriter::{create_pty_with_fork, create_pty_with_spawn};
 
 pub struct Context<T: EventListener> {
+    event_proxy: T,
     pub route_id: usize,
     pub terminal: Arc<FairMutex<Crosswords<T>>>,
     pub renderable_content: RenderableContent,
@@ -168,7 +169,7 @@ fn spawned_program_name(config: &ContextManagerConfig) -> String {
         .unwrap_or(program)
 }
 
-pub fn create_dead_context<T: rio_backend::event::EventListener>(
+pub fn create_dead_context<T: rio_backend::event::EventListener + Clone>(
     event_proxy: T,
     window_id: WindowId,
     route_id: usize,
@@ -178,7 +179,7 @@ pub fn create_dead_context<T: rio_backend::event::EventListener>(
     let terminal = Crosswords::new(
         dimension,
         CursorShape::Block,
-        event_proxy,
+        event_proxy.clone(),
         window_id,
         route_id,
         // Dead context never sees new input — no scrollback needed.
@@ -188,6 +189,7 @@ pub fn create_dead_context<T: rio_backend::event::EventListener>(
     let (sender, _receiver) = corcovado::channel::channel();
 
     Context {
+        event_proxy,
         route_id,
         #[cfg(not(target_os = "windows"))]
         main_fd: Arc::new(-1),
@@ -246,6 +248,56 @@ fn current_index_after_tab_removal(current: usize, removed: usize) -> usize {
 }
 
 impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
+    pub fn from_tab(
+        tab: ContextGrid<T>,
+        event_proxy: T,
+        window_id: WindowId,
+        config: ContextManagerConfig,
+    ) -> Self {
+        let current_route = tab.current().route_id;
+        let mut manager = Self {
+            contexts: smallvec![tab],
+            current_index: 0,
+            current_route,
+            capacity: DEFAULT_CONTEXT_CAPACITY,
+            event_proxy,
+            window_id,
+            config,
+        };
+        manager.retarget_current_tab();
+        manager
+    }
+
+    fn retarget_current_tab(&mut self) {
+        let window_id = self.window_id;
+        for item in self.current_grid_mut().contexts_mut().values_mut() {
+            item.val.event_proxy.retarget_window(window_id);
+            item.val.terminal.lock().window_id = window_id;
+            item.val
+                .renderable_content
+                .pending_update
+                .set_terminal_damage(crate::event::TerminalDamage::Full);
+        }
+    }
+
+    /// The caller must close an empty source window before processing another event.
+    pub fn take_current_tab(&mut self) -> ContextGrid<T> {
+        let tab = self.contexts.remove(self.current_index);
+        self.current_index = self.current_index.saturating_sub(1);
+        if !self.contexts.is_empty() {
+            self.sync_current_route();
+        }
+        tab
+    }
+
+    pub fn insert_tab(&mut self, tab: ContextGrid<T>, index: usize) {
+        let index = index.min(self.contexts.len());
+        self.contexts.insert(index, tab);
+        self.current_index = index;
+        self.retarget_current_tab();
+        self.sync_current_route();
+    }
+
     #[inline]
     fn create_context(
         cursor_state: (&Cursor, bool),
@@ -256,6 +308,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         config: &ContextManagerConfig,
     ) -> Result<Context<T>, Box<dyn Error>> {
         let route_id = ROUTE_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let event_proxy = event_proxy.for_window(window_id);
 
         #[cfg(test)]
         if config.dead_pty {
@@ -384,6 +437,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         let messenger = Messenger::new(channel);
 
         let mut context = Context {
+            event_proxy,
             route_id,
             #[cfg(not(target_os = "windows"))]
             main_fd,
@@ -1466,6 +1520,74 @@ pub fn process_open_url(
 pub mod test {
     use super::*;
     use crate::event::VoidListener;
+
+    #[test]
+    fn tab_transfer_keeps_session_and_metadata() {
+        let mut source =
+            ContextManager::start_with_capacity(5, VoidListener, WindowId::from(1))
+                .unwrap();
+        source.add_context(true, 0);
+        source.current_grid_mut().custom_title = Some("shell 日本語".into());
+        source.current_grid_mut().custom_color = Some([0.3, 0.2, 0.1, 1.0]);
+        source.current_grid_mut().bell = true;
+        let route_id = source.current().route_id;
+        let terminal = Arc::clone(&source.current().terminal);
+        let rich_text_id = source.current().rich_text_id;
+
+        let tab = source.take_current_tab();
+        assert_eq!(source.len(), 1);
+        assert_ne!(source.current_route(), route_id);
+
+        let mut destination =
+            ContextManager::start_with_capacity(5, VoidListener, WindowId::from(2))
+                .unwrap();
+        let previous_route = destination.current().route_id;
+        destination.insert_tab(tab, 0);
+        assert_eq!(destination.len(), 2);
+        assert_eq!(destination.current_index(), 0);
+        assert_eq!(destination.current_route(), route_id);
+        assert!(Arc::ptr_eq(&terminal, &destination.current().terminal));
+        assert_eq!(destination.current().rich_text_id, rich_text_id);
+        assert_eq!(terminal.lock().window_id, WindowId::from(2));
+        assert_eq!(
+            destination.current_grid().custom_title.as_deref(),
+            Some("shell 日本語")
+        );
+        assert_eq!(
+            destination.current_grid().custom_color,
+            Some([0.3, 0.2, 0.1, 1.0])
+        );
+        assert!(destination.current_grid().bell);
+        destination.set_current(1);
+        assert_eq!(destination.current_route(), previous_route);
+    }
+
+    #[test]
+    fn last_tab_transfer_can_round_trip() {
+        let mut source =
+            ContextManager::start_with_capacity(5, VoidListener, WindowId::from(1))
+                .unwrap();
+        let route_id = source.current().route_id;
+        let tab = source.take_current_tab();
+        assert_eq!(source.len(), 0);
+        let mut destination = ContextManager::from_tab(
+            tab,
+            VoidListener,
+            WindowId::from(2),
+            ContextManagerConfig::default(),
+        );
+        assert_eq!(destination.current_route(), route_id);
+        assert_eq!(
+            destination.current().terminal.lock().window_id,
+            WindowId::from(2)
+        );
+        source.insert_tab(destination.take_current_tab(), usize::MAX);
+        assert_eq!(source.current_route(), route_id);
+        assert_eq!(
+            source.current().terminal.lock().window_id,
+            WindowId::from(1)
+        );
+    }
 
     #[test]
     fn inheritance_uses_focused_tab_and_respects_opt_out() {

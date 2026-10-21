@@ -96,6 +96,7 @@ struct TabDrag {
     current_x: f32,
     // True once movement exceeded `DRAG_THRESHOLD`.
     started: bool,
+    external: bool,
 }
 
 fn fit_title_to_width<'a>(
@@ -492,6 +493,7 @@ impl Island {
             grab_offset,
             current_x: x,
             started: false,
+            external: false,
         });
     }
 
@@ -515,6 +517,27 @@ impl Island {
         self.drag.is_some()
     }
 
+    /// A vertical departure from the strip also starts a drag.
+    pub fn activate_drag(&mut self) {
+        if let Some(drag) = &mut self.drag {
+            drag.started = true;
+        }
+    }
+
+    pub fn set_drag_external(&mut self, external: bool) {
+        if let Some(drag) = &mut self.drag {
+            drag.external = external;
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn drag_grab_offset(&self) -> Option<f32> {
+        self.drag
+            .as_ref()
+            .filter(|drag| drag.started)
+            .map(|drag| drag.grab_offset)
+    }
+
     /// Index of the dragged tab, if a drag is active.
     pub fn drag_index(&self) -> Option<usize> {
         self.drag
@@ -534,6 +557,12 @@ impl Island {
         let max_left =
             layout.left_margin + (layout.tabs_width - layout.tab_width).max(0.0);
         Some(left.clamp(layout.left_margin, max_left))
+    }
+
+    fn drag_draws_in_strip(&self) -> bool {
+        self.drag
+            .as_ref()
+            .is_some_and(|drag| drag.started && !drag.external)
     }
 
     /// Center x of the floating tab — the reference point that decides
@@ -781,12 +810,9 @@ impl Island {
             return;
         }
 
-        // A lone tab draws as a centred title with no island, and cannot be
-        // reordered. A drag can only start with two or more tabs, but one can
-        // outlive the second tab (its shell exits mid-drag), and that would
-        // float an island where the title belongs.
+        // A lone tab keeps its centred title while being dragged to another
+        // window. Keep the gesture armed, but suppress reorder animations.
         if num_tabs == 1 {
-            self.drag = None;
             self.slide_springs.clear();
         }
 
@@ -826,8 +852,10 @@ impl Island {
 
         // Active drag: the dragged tab is skipped in the slot loop and
         // drawn floating (after the loop, on a higher layer) instead.
-        let drag_index = self.drag_index();
-        let floating_left = self.drag_floating_left(&layout);
+        let drag_index = self.drag_index().filter(|_| num_tabs > 1);
+        let floating_left = self
+            .drag_floating_left(&layout)
+            .filter(|_| num_tabs > 1 && self.drag_draws_in_strip());
 
         // Adaptive island fills, derived from the effective window bg
         // each frame so OSC 11 and theme changes stay coherent. The
@@ -1960,6 +1988,22 @@ mod tests {
         assert_eq!(island.drag_index(), Some(0));
         island.cancel_drag();
         assert!(!island.is_dragging());
+    }
+
+    #[test]
+    fn external_drag_keeps_identity_and_hides_strip_copy() {
+        let mut island = test_island();
+        island.start_drag(1, 20.0, 120.0);
+        island.activate_drag();
+        assert!(island.drag_draws_in_strip());
+        island.set_drag_external(true);
+        assert!(!island.drag_draws_in_strip());
+        assert_eq!(island.drag_index(), Some(1));
+        island.set_drag_external(false);
+        assert!(island.drag_draws_in_strip());
+        island.cancel_drag();
+        assert!(!island.drag_draws_in_strip());
+        assert_eq!(island.drag_index(), None);
     }
 
     fn test_layout() -> TabStripLayout {
