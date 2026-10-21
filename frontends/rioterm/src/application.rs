@@ -151,44 +151,6 @@ fn update_tab_drag_preview(
     }
 }
 
-#[cfg(test)]
-mod tab_transfer_tests {
-    use super::*;
-
-    #[test]
-    fn overlapping_maximized_strips_accept_transfer_after_focus_switch() {
-        for scale in [1.0, 1.25, 2.0] {
-            let (x, y, width) = (120.0 * scale, 16.0 * scale, 1920.0 * scale);
-            assert!(tab_drop_transfers(true, x, y, width, scale));
-            assert!(!tab_drop_transfers(false, x, y, width, scale));
-            assert!(tab_drop_transfers(false, x, 100.0 * scale, width, scale));
-        }
-    }
-
-    #[test]
-    fn detached_window_inherits_live_parent_state() {
-        use rio_backend::config::window::WindowMode;
-        assert_eq!(detached_window_mode(false, false), WindowMode::Windowed);
-        assert_eq!(detached_window_mode(false, true), WindowMode::Maximized);
-        assert_eq!(detached_window_mode(true, true), WindowMode::Fullscreen);
-        assert_eq!(detached_window_mode(true, false), WindowMode::Fullscreen);
-    }
-
-    #[test]
-    fn tab_detach_threshold_scales_with_dpi() {
-        for scale in [1.0, 1.25, 2.0] {
-            let width = 800.0 * scale;
-            let bottom = crate::renderer::island::ISLAND_HEIGHT as f64 * scale;
-            assert!(!tab_left_strip(100.0, bottom + 10.0 * scale, width, scale));
-            assert!(tab_left_strip(100.0, bottom + 13.0 * scale, width, scale));
-            assert!(!tab_left_strip(-10.0 * scale, 10.0, width, scale));
-            assert!(tab_left_strip(-13.0 * scale, 10.0, width, scale));
-            assert!(tab_left_strip(width + 13.0 * scale, 10.0, width, scale));
-            assert!(tab_left_strip(100.0, -13.0 * scale, width, scale));
-        }
-    }
-}
-
 pub struct Application<'a> {
     config: rio_backend::config::Config,
     /// The title template shows `{{columns}}`/`{{lines}}`, so a resize
@@ -402,8 +364,7 @@ impl Application<'_> {
                 &screen.context_manager.displayed_title_for_current_tab(),
                 island.title_font_family.as_deref(),
                 island.title_font_size * image_scale,
-                pixel_width,
-                pixel_height,
+                (pixel_width, pixel_height),
                 screen
                     .context_manager
                     .current_grid()
@@ -3364,4 +3325,42 @@ where
     std::thread::sleep(crate::constants::BELL_DURATION);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tab_transfer_tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_maximized_strips_accept_transfer_after_focus_switch() {
+        for scale in [1.0, 1.25, 2.0] {
+            let (x, y, width) = (120.0 * scale, 16.0 * scale, 1920.0 * scale);
+            assert!(tab_drop_transfers(true, x, y, width, scale));
+            assert!(!tab_drop_transfers(false, x, y, width, scale));
+            assert!(tab_drop_transfers(false, x, 100.0 * scale, width, scale));
+        }
+    }
+
+    #[test]
+    fn detached_window_inherits_live_parent_state() {
+        use rio_backend::config::window::WindowMode;
+        assert_eq!(detached_window_mode(false, false), WindowMode::Windowed);
+        assert_eq!(detached_window_mode(false, true), WindowMode::Maximized);
+        assert_eq!(detached_window_mode(true, true), WindowMode::Fullscreen);
+        assert_eq!(detached_window_mode(true, false), WindowMode::Fullscreen);
+    }
+
+    #[test]
+    fn tab_detach_threshold_scales_with_dpi() {
+        for scale in [1.0, 1.25, 2.0] {
+            let width = 800.0 * scale;
+            let bottom = crate::renderer::island::ISLAND_HEIGHT as f64 * scale;
+            assert!(!tab_left_strip(100.0, bottom + 10.0 * scale, width, scale));
+            assert!(tab_left_strip(100.0, bottom + 13.0 * scale, width, scale));
+            assert!(!tab_left_strip(-10.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(-13.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(width + 13.0 * scale, 10.0, width, scale));
+            assert!(tab_left_strip(100.0, -13.0 * scale, width, scale));
+        }
+    }
 }

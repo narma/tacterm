@@ -16,8 +16,8 @@ impl TabDragImage {
         (24..=4096).contains(&self.width)
             && (20..=256).contains(&self.height)
             && (1..=8).contains(&self.scale)
-            && self.width % self.scale as u32 == 0
-            && self.height % self.scale as u32 == 0
+            && self.width.is_multiple_of(self.scale as u32)
+            && self.height.is_multiple_of(self.scale as u32)
             && self.rgba.len() == self.width as usize * self.height as usize * 4
     }
 }

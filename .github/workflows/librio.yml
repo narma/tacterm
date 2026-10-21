@@ -33,7 +33,7 @@ jobs:
       - run: cargo test -p librio
       - run: make librio-ctest
       - run: make librio-xcframework
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: RioKit.xcframework
           path: target/librio/RioKit.xcframework

@@ -59,7 +59,7 @@ jobs:
         run: xvfb-run -a cargo test -p rioterm --features wgpu preview_keeps_pixels_focus_and_drop_target -- --ignored
       - name: Upload desktop build for manual interaction checks
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: tacterm-test-${{ runner.os }}-${{ runner.arch }}
           path: target/debug/tacterm${{ runner.os == 'Windows' && '.exe' || '' }}
@@ -69,7 +69,7 @@ jobs:
         # One HTML per run showing which crates dominated and whether the
         # cache actually hit; download it when CI feels slow.
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: cargo-timings
           path: target/cargo-timings/
@@ -84,7 +84,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
@@ -106,7 +106,7 @@ jobs:
           fontconfig:p
 
     - name: Cache target dir
-      uses: actions/cache@v4
+      uses: actions/cache@v6.1.0
       with:
         path: target
         key: msys2-${{ matrix.sys }}-smoke-${{ hashFiles('**/Cargo.lock') }}

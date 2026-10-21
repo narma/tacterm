@@ -1,6 +1,8 @@
 #[cfg(target_os = "macos")]
 use rio_backend::sugarloaf::font::drag_image::DragImage;
 #[cfg(target_os = "macos")]
+// This harness checks panel lifecycle, not pointer input or destination hit testing.
+#[allow(dead_code)]
 struct Pointer {
     position: rio_window::dpi::PhysicalPosition<f64>,
     down: bool,
@@ -8,6 +10,7 @@ struct Pointer {
 }
 #[cfg(target_os = "macos")]
 #[path = "../src/platform/tab_drag_macos.rs"]
+#[allow(dead_code)]
 mod native;
 
 #[cfg(target_os = "macos")]

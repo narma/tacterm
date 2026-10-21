@@ -60,6 +60,9 @@ impl DragState {
         seats: &SeatState,
     ) -> Self {
         let manager: Option<WlDataDeviceManager> = globals.bind(queue, 3..=3, ()).ok();
+        // ObjectId equality and hashing use stable protocol identity, even though
+        // its connection handle has interior mutability.
+        #[allow(clippy::mutable_key_type)]
         let mut devices = HashMap::new();
         if let Some(manager) = &manager {
             for seat in seats.seats() {

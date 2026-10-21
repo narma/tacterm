@@ -155,6 +155,8 @@ impl Drop for Drag {
 }
 
 #[cfg(test)]
+// Called by the main-thread integration harness; unused in the binary's tests.
+#[allow(dead_code)]
 pub(super) fn verify_preview_lifecycle(window: &Window) {
     let image = DragImage {
         rgba: [12, 34, 56, 255].repeat(240 * 24),

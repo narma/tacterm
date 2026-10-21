@@ -16,11 +16,11 @@ pub fn render(
     title: &str,
     family: Option<&str>,
     size: f32,
-    width: u32,
-    height: u32,
+    dimensions: (u32, u32),
     background: [f32; 4],
     foreground: [f32; 4],
 ) -> Option<DragImage> {
+    let (width, height) = dimensions;
     if !size.is_finite() || !(1.0..=256.0).contains(&size) {
         return None;
     }
@@ -167,13 +167,13 @@ mod tests {
         let bg = [0.1, 0.2, 0.3, 1.0];
         let fg = [1.0; 4];
         let title = "Shell · Проект · 日本語 · e\u{301}";
-        let image = render(&library, title, None, 16.0, 320, 32, bg, fg).unwrap();
+        let image = render(&library, title, None, 16.0, (320, 32), bg, fg).unwrap();
         assert_eq!(image.rgba.len(), 320 * 32 * 4);
         assert!(image.rgba.chunks_exact(4).enumerate().any(|(i, p)| {
             let (x, y) = (i % 320, i / 320);
             x > 4 && x < 315 && y > 2 && y < 29 && p[0] > 100
         }));
-        assert!(render(&library, title, None, 16.0, u32::MAX, 32, bg, fg).is_none());
-        assert!(render(&library, title, None, f32::NAN, 320, 32, bg, fg).is_none());
+        assert!(render(&library, title, None, 16.0, (u32::MAX, 32), bg, fg).is_none());
+        assert!(render(&library, title, None, f32::NAN, (320, 32), bg, fg).is_none());
     }
 }
