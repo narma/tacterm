@@ -20,6 +20,21 @@ pub fn render(
     background: [f32; 4],
     foreground: [f32; 4],
 ) -> Option<DragImage> {
+    render_inner(
+        library, title, family, size, dimensions, background, foreground,
+    )
+    .map(|(image, _)| image)
+}
+
+fn render_inner(
+    library: &FontLibrary,
+    title: &str,
+    family: Option<&str>,
+    size: f32,
+    dimensions: (u32, u32),
+    background: [f32; 4],
+    foreground: [f32; 4],
+) -> Option<(DragImage, usize)> {
     let (width, height) = dimensions;
     if !size.is_finite() || !(1.0..=256.0).contains(&size) {
         return None;
@@ -92,6 +107,7 @@ pub fn render(
     let mut shaping = ShapeContext::new();
     let mut scaling = ScaleContext::new();
     let mut pen = 8.0;
+    let mut rasterized = 0;
     for (id, text) in runs {
         let Some((data, offset, key)) = library.inner.read().get_data(&id) else {
             continue;
@@ -107,7 +123,14 @@ pub fn render(
         let baseline = (height as f32 + metrics.ascent - metrics.descent) / 2.0;
         let mut scaler = scaling.builder(font).size(size).hint(true).build();
         shaper.shape_with(|cluster| {
+            // Clip whole shaped clusters, preserving combining marks and ligatures.
+            // Keep one em of overhang for glyphs whose ink starts before the pen.
+            // The shaper may still visit the tail, but never rasterize that tail.
+            if pen >= width as f32 + size {
+                return;
+            }
             for glyph in cluster.glyphs {
+                rasterized += 1;
                 if let Some(image) =
                     Render::new(&[Source::Outline]).render(&mut scaler, glyph.id)
                 {
@@ -151,16 +174,43 @@ pub fn render(
             }
         }
     }
-    Some(DragImage {
-        rgba,
-        width,
-        height,
-    })
+    Some((
+        DragImage {
+            rgba,
+            width,
+            height,
+        },
+        rasterized,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn invisible_title_tail_does_not_rasterize_more_glyphs() {
+        let (library, _) = FontLibrary::new(Default::default());
+        for unit in ["W", "e\u{301}"] {
+            let render = |n| {
+                render_inner(
+                    &library,
+                    &unit.repeat(n),
+                    None,
+                    16.0,
+                    (240, 24),
+                    [0.1; 4],
+                    [1.0; 4],
+                )
+                .unwrap()
+            };
+            let (short, short_count) = render(64);
+            let (long, long_count) = render(2048);
+            assert_eq!(short.rgba, long.rgba, "clipping changed visible text");
+            assert_eq!(short_count, long_count, "invisible tail was rasterized");
+            assert!(long_count < 64, "preview work must follow its width");
+        }
+    }
+
     #[test]
     fn title_image_is_bounded_and_renders_mixed_clusters() {
         let (library, _) = FontLibrary::new(Default::default());

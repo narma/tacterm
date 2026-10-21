@@ -1,3 +1,6 @@
+#[cfg(any(all(target_os = "linux", feature = "x11"), test))]
+mod tab_drag_poll;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
 

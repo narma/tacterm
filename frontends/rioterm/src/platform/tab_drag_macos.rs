@@ -103,18 +103,18 @@ impl Drag {
             ))
         }
     }
-    pub fn sample(&mut self, window: &Window) -> io::Result<Pointer> {
+    pub fn sample(&mut self, window: &Window) -> io::Result<Option<Pointer>> {
         // SAFETY: Class methods only read global input; they do not inject it.
         unsafe {
             self.point = msg_send![class!(NSEvent), mouseLocation];
             let buttons: usize = msg_send![class!(NSEvent), pressedMouseButtons];
-            Ok(Pointer {
+            Ok(Some(Pointer {
                 position: self
                     .local(window)
                     .ok_or_else(|| io::Error::other("missing Cocoa view"))?,
                 down: buttons & 1 != 0,
                 escape: CGEventSourceKeyState(1, 53),
-            })
+            }))
         }
     }
     pub fn show(&mut self, visible: bool) -> io::Result<()> {

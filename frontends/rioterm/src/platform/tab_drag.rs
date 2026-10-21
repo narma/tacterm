@@ -48,7 +48,7 @@ impl DesktopDrag {
         #[allow(unreachable_code)]
         Err(io::Error::other("desktop tab drag backend unavailable"))
     }
-    pub fn sample(&mut self, window: &Window) -> io::Result<Pointer> {
+    pub fn sample(&mut self, window: &Window) -> io::Result<Option<Pointer>> {
         #[cfg(any(target_os = "macos", feature = "x11"))]
         {
             return self.inner.sample(window);

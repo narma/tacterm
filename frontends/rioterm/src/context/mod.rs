@@ -46,6 +46,7 @@ use teletypewriter::{create_pty_with_fork, create_pty_with_spawn};
 
 pub struct Context<T: EventListener> {
     event_proxy: T,
+    reported_focus: Option<bool>,
     pub route_id: usize,
     pub terminal: Arc<FairMutex<Crosswords<T>>>,
     pub renderable_content: RenderableContent,
@@ -68,6 +69,30 @@ pub struct Context<T: EventListener> {
     /// inspecting the foreground process.
     pub spawned_program: String,
     _io_thread: Option<JoinHandle<(Machine<teletypewriter::Pty, T>, performer::State)>>,
+}
+
+impl<T: EventListener> Context<T> {
+    /// Reconcile session focus even when the destination OS window was already
+    /// active. Deduplicate the native focus event that may follow a transfer.
+    pub fn report_focus(&mut self, focused: bool) {
+        if !self
+            .terminal
+            .lock()
+            .mode()
+            .contains(crate::crosswords::Mode::FOCUS_IN_OUT)
+        {
+            self.reported_focus = None;
+            return;
+        }
+        if self.reported_focus != Some(focused) {
+            self.messenger.send_write(if focused {
+                &b"\x1b[I"[..]
+            } else {
+                &b"\x1b[O"[..]
+            });
+            self.reported_focus = Some(focused);
+        }
+    }
 }
 
 impl<T: rio_backend::event::EventListener> Drop for Context<T> {
@@ -190,6 +215,7 @@ pub fn create_dead_context<T: rio_backend::event::EventListener + Clone>(
 
     Context {
         event_proxy,
+        reported_focus: None,
         route_id,
         #[cfg(not(target_os = "windows"))]
         main_fd: Arc::new(-1),
@@ -438,6 +464,7 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
 
         let mut context = Context {
             event_proxy,
+            reported_focus: None,
             route_id,
             #[cfg(not(target_os = "windows"))]
             main_fd,
@@ -1520,6 +1547,45 @@ pub fn process_open_url(
 pub mod test {
     use super::*;
     use crate::event::VoidListener;
+
+    #[test]
+    fn transferred_session_reports_focus_in_an_already_active_window() {
+        use crate::ansi::mode::PrivateMode;
+        use crate::performer::handler::Handler;
+        let mut source =
+            ContextManager::start_with_capacity(2, VoidListener, WindowId::from(1))
+                .unwrap();
+        let context = source.current_mut();
+        let (sender, receiver) = corcovado::channel::channel();
+        context.messenger = Messenger::new(sender);
+        context
+            .terminal
+            .lock()
+            .set_private_mode(PrivateMode::new(1004));
+        context.report_focus(false);
+        let mut destination = ContextManager::from_tab(
+            source.take_current_tab(),
+            VoidListener,
+            WindowId::from(2),
+            ContextManagerConfig::default(),
+        );
+        let context = destination.current_mut();
+        context.report_focus(true);
+        context.report_focus(true); // later native event must not duplicate it
+        for expected in [&b"\x1b[O"[..], &b"\x1b[I"[..]] {
+            match receiver.try_recv().unwrap() {
+                Msg::Input(bytes) => assert_eq!(&*bytes, expected),
+                other => panic!("unexpected PTY message: {other:?}"),
+            }
+        }
+        assert!(receiver.try_recv().is_err());
+        context
+            .terminal
+            .lock()
+            .unset_private_mode(PrivateMode::new(1004));
+        context.report_focus(false);
+        assert!(receiver.try_recv().is_err(), "focus reporting is opt-in");
+    }
 
     #[test]
     fn tab_transfer_keeps_session_and_metadata() {

@@ -1,7 +1,8 @@
 use super::{DragImage, Pointer};
+use crate::platform::tab_drag_poll::Poller;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use rio_window::{dpi::PhysicalPosition, window::Window};
-use std::io;
+use std::{io, os::fd::AsRawFd, sync::Arc};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -12,8 +13,9 @@ use x11rb::{
 };
 
 pub struct Drag {
-    connection: RustConnection,
-    root: u32,
+    connection: Arc<RustConnection>,
+    sampler: Option<Poller<Sample>>,
+    targets: Vec<(u32, PhysicalPosition<f64>)>,
     preview: u32,
     gc: u32,
     pixmap: u32,
@@ -74,8 +76,9 @@ impl Drag {
             .map_err(io::Error::other)?;
         // Own resources immediately so every later error destroys the popup.
         let mut drag = Self {
-            connection,
-            root,
+            connection: Arc::new(connection),
+            sampler: None,
+            targets: Vec::new(),
             preview,
             gc,
             pixmap,
@@ -153,34 +156,24 @@ impl Drag {
         {
             drag.escape_key = min + index as u8;
         }
-        drag.sample(window)?;
+        let connection = Arc::clone(&drag.connection);
+        let source = id(window).ok_or_else(|| io::Error::other("missing X11 source"))?;
+        let escape = drag.escape_key;
+        drag.sampler = Some(Poller::spawn(move || {
+            let sample = sample_pointer(&connection, source, root, escape)?;
+            let finished = !sample.pointer.down || sample.pointer.escape;
+            Ok((sample, finished))
+        })?);
         Ok(drag)
     }
-    pub fn sample(&mut self, window: &Window) -> io::Result<Pointer> {
-        let pointer = self
-            .connection
-            .query_pointer(self.root)
-            .map_err(io::Error::other)?
-            .reply()
-            .map_err(io::Error::other)?;
-        self.point = (pointer.root_x, pointer.root_y);
-        let keys = self
-            .connection
-            .query_keymap()
-            .map_err(io::Error::other)?
-            .reply()
-            .map_err(io::Error::other)?;
-        let origin = window.inner_position().map_err(io::Error::other)?;
-        Ok(Pointer {
-            position: PhysicalPosition::new(
-                pointer.root_x as f64 - origin.x as f64,
-                pointer.root_y as f64 - origin.y as f64,
-            ),
-            down: pointer.mask.contains(KeyButMask::BUTTON1),
-            escape: keys.keys[self.escape_key as usize / 8]
-                & (1 << (self.escape_key % 8))
-                != 0,
-        })
+    pub fn sample(&mut self, _window: &Window) -> io::Result<Option<Pointer>> {
+        let Some(sample) = self.sampler.as_ref().and_then(Poller::take) else {
+            return Ok(None);
+        };
+        let sample = sample?;
+        self.point = sample.root_position;
+        self.targets = sample.targets;
+        Ok(Some(sample.pointer))
     }
     pub fn show(&mut self, visible: bool) -> io::Result<()> {
         if visible {
@@ -210,21 +203,9 @@ impl Drag {
     }
     pub fn target_position(&self, window: &Window) -> Option<PhysicalPosition<f64>> {
         let target = id(window)?;
-        let mut current = self.root;
-        for _ in 0..64 {
-            let pointer = self.connection.query_pointer(current).ok()?.reply().ok()?;
-            if current == target {
-                return Some(PhysicalPosition::new(
-                    pointer.win_x as f64,
-                    pointer.win_y as f64,
-                ));
-            }
-            if pointer.child == 0 {
-                return None;
-            }
-            current = pointer.child;
-        }
-        None
+        self.targets
+            .iter()
+            .find_map(|(id, point)| (*id == target).then_some(*point))
     }
 }
 impl Drop for Drag {
@@ -233,7 +214,66 @@ impl Drop for Drag {
         let _ = self.connection.free_pixmap(self.pixmap);
         let _ = self.connection.destroy_window(self.preview);
         let _ = self.connection.flush();
+        self.sampler = None;
+        // SAFETY: Arc keeps this socket alive through shutdown, including while
+        // the worker awaits a reply. It is this gesture's private connection.
+        unsafe {
+            libc::shutdown(self.connection.stream().as_raw_fd(), libc::SHUT_RDWR);
+        }
     }
+}
+
+struct Sample {
+    pointer: Pointer,
+    root_position: (i16, i16),
+    targets: Vec<(u32, PhysicalPosition<f64>)>,
+}
+
+fn sample_pointer(
+    connection: &RustConnection,
+    source: u32,
+    root: u32,
+    escape: u8,
+) -> io::Result<Sample> {
+    // Send both requests before waiting: one server round trip, on the worker.
+    // Querying the source gives both local and root coordinates without calling
+    // Window::inner_position (another synchronous X request) on the UI thread.
+    let pointer = connection.query_pointer(source).map_err(io::Error::other)?;
+    let keys = connection.query_keymap().map_err(io::Error::other)?;
+    let pointer = pointer.reply().map_err(io::Error::other)?;
+    let keys = keys.reply().map_err(io::Error::other)?;
+    let down = pointer.mask.contains(KeyButMask::BUTTON1);
+    let escape = keys.keys[escape as usize / 8] & (1 << (escape % 8)) != 0;
+    let mut targets = Vec::new();
+    if !down && !escape {
+        // Walk stacking once per drop, not once per candidate window. The input
+        // transparent preview cannot intercept this path.
+        let mut current = root;
+        for _ in 0..64 {
+            let hit = connection
+                .query_pointer(current)
+                .map_err(io::Error::other)?
+                .reply()
+                .map_err(io::Error::other)?;
+            targets.push((
+                current,
+                PhysicalPosition::new(hit.win_x as f64, hit.win_y as f64),
+            ));
+            if hit.child == 0 {
+                break;
+            }
+            current = hit.child;
+        }
+    }
+    Ok(Sample {
+        pointer: Pointer {
+            position: PhysicalPosition::new(pointer.win_x as f64, pointer.win_y as f64),
+            down,
+            escape,
+        },
+        root_position: (pointer.root_x, pointer.root_y),
+        targets,
+    })
 }
 
 #[cfg(test)]
@@ -265,19 +305,24 @@ mod tests {
             width: 240,
             height: 24,
         };
-        let mut drag = Drag::new(&source, &image, 20.0).unwrap();
+        let (connection, _) = x11rb::connect(None).unwrap();
         let target_id = id(&target).unwrap();
-        drag.connection
+        connection
             .set_input_focus(InputFocus::POINTER_ROOT, target_id, x11rb::CURRENT_TIME)
             .unwrap()
             .check()
             .unwrap();
-        drag.connection
+        connection
             .warp_pointer(0u32, target_id, 0, 0, 0, 0, 100, 50)
             .unwrap()
             .check()
             .unwrap();
-        drag.sample(&source).unwrap();
+        let mut drag = Drag::new(&source, &image, 20.0).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while drag.sample(&source).unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
         drag.show(true).unwrap();
         let pixels = drag
             .connection

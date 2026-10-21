@@ -3449,30 +3449,10 @@ impl Screen<'_> {
 
     /// Reset terminal to the state before search was started.
     fn search_reset_state(&mut self) {
-        // Unschedule pending timers.
-        // let timer_id = TimerId::new(Topic::DelayedSearch, self.display.window.id());
-        // self.scheduler.unschedule(timer_id);
-
-        // Clear focused match.
-        self.search_state.focused_match = None;
-
-        // The viewport reset logic is only needed for vi mode, since without it our origin is
-        // always at the current display offset instead of at the vi cursor position which we need
-        // to recover to.
-        let mode = self.get_mode();
-        if !mode.contains(Mode::VI) {
-            return;
-        }
-
-        // Reset display offset and cursor position.
-        {
-            let mut terminal = self.context_manager.current_mut().terminal.lock();
-            terminal.vi_mode_cursor.pos = self.search_state.origin;
-            terminal
-                .scroll_display(Scroll::Delta(self.search_state.display_offset_delta));
-            drop(terminal);
-        }
-        self.search_state.display_offset_delta = 0;
+        restore_search_viewport(
+            &mut self.search_state,
+            &mut self.context_manager.current_mut().terminal.lock(),
+        );
     }
 
     /// Jump to the first regex match from the search origin.
@@ -3687,15 +3667,7 @@ impl Screen<'_> {
             }
         }
 
-        if self.get_mode().contains(Mode::FOCUS_IN_OUT) {
-            let chr = if is_focused { "I" } else { "O" };
-
-            let msg = format!("\x1b[{chr}");
-            self.ctx_mut()
-                .current_mut()
-                .messenger
-                .send_write(msg.into_bytes());
-        }
+        self.ctx_mut().current_mut().report_focus(is_focused);
     }
 
     #[inline]
@@ -5240,9 +5212,50 @@ fn post_process_hyperlink_uri(uri: &str) -> String {
     chars.into_iter().take(end_idx + 1).collect()
 }
 
+// Search origin is meaningful only while a search is active. Transfers and tab
+// switches also cancel search, including when the user is only navigating in VI.
+fn restore_search_viewport<T: rio_backend::event::EventListener>(
+    search: &mut rio_backend::event::SearchState,
+    terminal: &mut rio_backend::crosswords::Crosswords<T>,
+) {
+    search.focused_match = None;
+    if search.history_index.is_none() || !terminal.mode().contains(Mode::VI) {
+        return;
+    }
+    terminal.vi_mode_cursor.pos = search.origin;
+    terminal.scroll_display(Scroll::Delta(search.display_offset_delta));
+    search.display_offset_delta = 0;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transfer_search_cleanup_preserves_vi_cursor_without_active_search() {
+        use rio_backend::event::{SearchState, VoidListener, WindowId};
+        let context = crate::context::create_dead_context(
+            VoidListener,
+            WindowId::from(1),
+            1,
+            1,
+            Default::default(),
+        );
+        let mut terminal = context.terminal.lock();
+        terminal.toggle_vi_mode();
+        let cursor = Pos::new(Line(0), Column(1));
+        terminal.vi_mode_cursor.pos = cursor;
+        let mut search = SearchState::default();
+        restore_search_viewport(&mut search, &mut terminal);
+        assert_eq!(terminal.vi_mode_cursor.pos, cursor);
+        // A completed search retains its origin but must not restore it again.
+        search.origin = Pos::new(Line(0), Column(0));
+        restore_search_viewport(&mut search, &mut terminal);
+        assert_eq!(terminal.vi_mode_cursor.pos, cursor);
+        search.history_index = Some(0);
+        restore_search_viewport(&mut search, &mut terminal);
+        assert_eq!(terminal.vi_mode_cursor.pos, search.origin);
+    }
 
     #[test]
     fn chrome_press_validates_double_click() {
