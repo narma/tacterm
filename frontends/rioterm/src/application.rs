@@ -3273,6 +3273,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     // This is irreversible - if this event is emitted, it is guaranteed to be the last event that gets emitted.
     // You generally want to treat this as an “do on quit” event.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            self.desktop_tab_drag = None;
+            self.native_tab_drag_source = None;
+        }
         #[cfg(windows)]
         {
             self.tab_drag_preview = None;
