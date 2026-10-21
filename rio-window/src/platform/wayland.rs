@@ -70,8 +70,10 @@ pub trait WindowExtWayland {
 
 impl WindowExtWayland for Window {
     fn cancel_tab_drag(&self) {
-        if let crate::platform_impl::Window::Wayland(window) = &self.window {
-            window.cancel_tab_drag();
+        match &self.window {
+            crate::platform_impl::Window::Wayland(window) => window.cancel_tab_drag(),
+            #[cfg(x11_platform)]
+            _ => {}
         }
     }
     fn start_tab_drag(

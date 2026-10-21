@@ -140,8 +140,9 @@ impl WinitState {
             .unwrap();
         let seat_and_serial = std::cell::RefCell::new(None);
         window.apply_on_pointer(|_, data| {
-            *seat_and_serial.borrow_mut() =
-                Some((data.seat().clone(), data.latest_button_serial()));
+            if let Some(serial) = data.tab_drag_serial() {
+                *seat_and_serial.borrow_mut() = Some((data.seat().clone(), serial));
+            }
         });
         let (seat, serial) = seat_and_serial
             .into_inner()

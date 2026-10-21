@@ -21,6 +21,12 @@ pub struct DesktopDrag {
     inner: native::Drag,
 }
 
+// Wayland-only builds have no desktop pointer backend; all samples arrive as
+// compositor events. Keep the common frontend API without linking X11.
+#[cfg_attr(
+    all(target_os = "linux", not(feature = "x11")),
+    allow(unused_variables)
+)]
 impl DesktopDrag {
     pub fn new(
         window: &Window,
