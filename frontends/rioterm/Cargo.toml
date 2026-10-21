@@ -16,6 +16,12 @@ readme.workspace = true
 name = "tacterm"
 path = "src/main.rs"
 
+# AppKit window tests must run on the process main thread, not a libtest worker.
+[[test]]
+name = "tab_drag_macos"
+path = "tests/tab_drag_macos.rs"
+harness = false
+
 [dependencies]
 global-hotkey = "0.8.0"
 base64 = { workspace = true }

@@ -153,3 +153,33 @@ impl Drop for Drag {
         }
     }
 }
+
+#[cfg(test)]
+pub(super) fn verify_preview_lifecycle(window: &Window) {
+    let image = DragImage {
+        rgba: [12, 34, 56, 255].repeat(240 * 24),
+        width: 240,
+        height: 24,
+    };
+    let mut drag = Drag::new(window, &image, 20.0).unwrap();
+    // SAFETY: Dedicated test executable runs on the AppKit main thread. The
+    // popup remains off-screen and no keyboard or pointer input is generated.
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let before: *mut AnyObject = msg_send![app, keyWindow];
+        drag.point = NSPoint::new(-30000.0, -30000.0);
+        drag.show(true).unwrap();
+        let frame: NSRect = msg_send![drag.panel, frame];
+        assert_eq!(frame.size.width, 240.0 / window.scale_factor());
+        assert_eq!(frame.size.height, 24.0 / window.scale_factor());
+        let ignores: Bool = msg_send![drag.panel, ignoresMouseEvents];
+        assert!(ignores.as_bool());
+        drag.point.x += 20.0;
+        drag.show(true).unwrap();
+        let after: *mut AnyObject = msg_send![app, keyWindow];
+        assert_eq!(before, after, "drag preview changed key window");
+        drag.show(false).unwrap();
+        let visible: Bool = msg_send![drag.panel, isVisible];
+        assert!(!visible.as_bool());
+    }
+}
