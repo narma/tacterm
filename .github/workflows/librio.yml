@@ -22,6 +22,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
+  # Use the same minimum OS for Rust, C++ dependencies and the C smoke test.
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
 
 jobs:
   librio:
