@@ -50,6 +50,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/ci-deduplicate
         id: check
+        with:
+          validation-jobs: '["Build (ubuntu-24.04)", "Build (ubuntu-24.04-arm)"]'
 
   lints:
     needs: changes

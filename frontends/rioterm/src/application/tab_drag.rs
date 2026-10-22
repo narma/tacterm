@@ -330,10 +330,10 @@ impl Application<'_> {
             return;
         };
         if self.tab_drag.native.source().is_none() {
-            let Some(route) = self.router.routes.get(&source_id) else {
+            let Some(route) = self.router.routes.get_mut(&source_id) else {
                 return;
             };
-            let screen = &route.window.screen;
+            let screen = &mut route.window.screen;
             let Some((width, grab)) = screen.tab_drag_preview_metrics() else {
                 return;
             };
@@ -380,10 +380,14 @@ impl Application<'_> {
                     pixel_height -= pixel_height % image_scale as u32;
                 }
             }
+            let title_font_id = island
+                .title_font_family
+                .as_deref()
+                .and_then(|family| screen.sugarloaf.text_mut().font_family_id(family));
             let Some(image) = rio_backend::sugarloaf::font::drag_image::render(
                 screen.sugarloaf.font_library(),
                 &screen.context_manager.displayed_title_for_current_tab(),
-                island.title_font_family.as_deref(),
+                title_font_id,
                 island.title_font_size * image_scale,
                 (pixel_width, pixel_height),
                 screen

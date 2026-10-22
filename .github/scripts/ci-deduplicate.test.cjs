@@ -19,9 +19,24 @@ test('only a successful identical PR merge revision can replace a run', () => {
   ]) assert.equal(isSuccessfulDuplicate({ ...passed, ...change }, current), false);
 });
 
-function fixture(pages) {
+const validatedJobs = [{ name: 'build', status: 'completed', conclusion: 'success' }];
+
+function fixture(pages, jobsByRun = { [passed.id]: validatedJobs }) {
   let calls = 0;
+  const checkedRuns = [];
+  const paginate = async (method, options) => {
+    assert.equal(method, args.github.rest.actions.listJobsForWorkflowRun);
+    assert.equal(options.filter, 'latest');
+    checkedRuns.push(options.run_id);
+    return jobsByRun[options.run_id] || [];
+  };
+  paginate.iterator = async function* (_method, options) {
+    assert.equal(options.head_sha, current.head_sha);
+    assert.equal(options.workflow_id, current.workflow_id);
+    for (const runs of pages) yield { data: runs };
+  };
   const args = {
+    validationJobs: ['build'],
     runAttempt: 1,
     context: { eventName: 'pull_request', repo: { owner: 'owner', repo: 'repo' }, runId: 42 },
     core: { notice() {}, warning() {} },
@@ -29,16 +44,67 @@ function fixture(pages) {
       rest: { actions: {
         async getWorkflowRun() { calls++; return { data: current }; },
         listWorkflowRuns() {},
+        listJobsForWorkflowRun() {},
       } },
-      paginate: { async *iterator(_method, options) {
-        assert.equal(options.head_sha, current.head_sha);
-        assert.equal(options.workflow_id, current.workflow_id);
-        for (const runs of pages) yield { data: runs };
-      } },
+      paginate,
     },
   };
-  return { args, calls: () => calls };
+  return { args, calls: () => calls, checkedRuns };
 }
+
+test('a deduplicated run cannot replace the original validated run', async () => {
+  const a = { ...passed, id: 39 };
+  const b = passed;
+  // B reuses A. C must look past B and still prove that A ran validation.
+  assert.equal(await shouldRun(fixture([[a]], { [a.id]: validatedJobs }).args), false);
+  const skipped = [{ name: 'build', status: 'completed', conclusion: 'skipped' }];
+  const { args, checkedRuns } = fixture([[b], [a]], {
+    [a.id]: validatedJobs, [b.id]: skipped,
+  });
+  assert.equal(await shouldRun(args), false);
+  assert.deepEqual(checkedRuns, [b.id, a.id]);
+  assert.equal(await shouldRun(fixture([[b]], { [b.id]: skipped }).args), true);
+});
+
+test('all declared validation jobs must have completed successfully', async () => {
+  for (const jobs of [[],
+    [{ name: 'build', status: 'completed', conclusion: 'skipped' }],
+    [{ name: 'build', status: 'completed', conclusion: 'failure' }],
+    [{ name: 'build', status: 'in_progress', conclusion: null }],
+    [{ name: 'Check for duplicate CI', status: 'completed', conclusion: 'success' }],
+  ]) {
+    assert.equal(await shouldRun(fixture([[passed]], { [passed.id]: jobs }).args), true);
+  }
+  const { args } = fixture([[passed]]);
+  args.validationJobs = ['build', 'another matrix job'];
+  assert.equal(await shouldRun(args), true);
+  args.validationJobs = [];
+  assert.equal(await shouldRun(args), true);
+});
+
+test('matrix validation requires every platform, but not a PR-excluded deployment', async () => {
+  const jobs = [
+    { name: 'Build (Linux)', status: 'completed', conclusion: 'success' },
+    { name: 'Build (Windows)', status: 'completed', conclusion: 'success' },
+    { name: 'deploy', status: 'completed', conclusion: 'skipped' },
+  ];
+  const { args } = fixture([[passed]], { [passed.id]: jobs });
+  args.validationJobs = ['Build (Linux)', 'Build (Windows)'];
+  assert.equal(await shouldRun(args), false);
+  jobs[1].conclusion = 'skipped';
+  assert.equal(await shouldRun(args), true);
+});
+
+test('job lookup errors do not suppress validation', async () => {
+  const { args } = fixture([[passed]]);
+  const iterator = args.github.paginate.iterator;
+  args.github.paginate = async () => { throw new Error('job lookup unavailable'); };
+  args.github.paginate.iterator = iterator;
+  let warning;
+  args.core.warning = message => { warning = message; };
+  assert.equal(await shouldRun(args), true);
+  assert.match(warning, /job lookup unavailable/);
+});
 
 test('finds a successful duplicate beyond the first API page', async () => {
   const { args } = fixture([[current], [passed]]);

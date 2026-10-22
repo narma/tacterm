@@ -1,5 +1,9 @@
 name: Avoid duplicate PR builds
 description: Reuse successful checks for the identical PR merge revision
+inputs:
+  validation-jobs:
+    description: JSON array of required validation job display names, including matrix suffixes
+    required: true
 outputs:
   run:
     description: Whether this workflow needs to execute its build jobs
@@ -12,7 +16,10 @@ runs:
       run: node --test .github/scripts/ci-deduplicate.test.cjs
     - uses: actions/github-script@v8
       id: check
+      env:
+        VALIDATION_JOBS: ${{ inputs.validation-jobs }}
       with:
         script: |
           const { shouldRun } = require('./.github/scripts/ci-deduplicate.cjs');
-          return await shouldRun({ github, context, core });
+          const validationJobs = JSON.parse(process.env.VALIDATION_JOBS);
+          return await shouldRun({ github, context, core, validationJobs });

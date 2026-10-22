@@ -11,17 +11,18 @@ pub struct DragImage {
 
 /// Uses the separate UI font and the existing fallback registry. The bounded
 /// image does not allocate a terminal surface or change terminal font metrics.
+/// `primary` is a font ID resolved by the caller's UI font cache for this library.
 pub fn render(
     library: &FontLibrary,
     title: &str,
-    family: Option<&str>,
+    primary: Option<usize>,
     size: f32,
     dimensions: (u32, u32),
     background: [f32; 4],
     foreground: [f32; 4],
 ) -> Option<DragImage> {
     render_inner(
-        library, title, family, size, dimensions, background, foreground,
+        library, title, primary, size, dimensions, background, foreground,
     )
     .map(|(image, _)| image)
 }
@@ -29,7 +30,7 @@ pub fn render(
 fn render_inner(
     library: &FontLibrary,
     title: &str,
-    family: Option<&str>,
+    primary: Option<usize>,
     size: f32,
     dimensions: (u32, u32),
     background: [f32; 4],
@@ -42,9 +43,7 @@ fn render_inner(
     if !(24..=4096).contains(&width) || !(20..=256).contains(&height) {
         return None;
     }
-    let primary = family
-        .and_then(|f| library.register_font_family(f))
-        .unwrap_or(0);
+    let primary = primary.unwrap_or(0);
     let rgb = |c: [f32; 4]| c.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
     let bg = rgb(background);
     let fg = rgb(foreground);
@@ -187,6 +186,31 @@ fn render_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn cached_title_face_is_reused_for_repeated_drags() {
+        let (library, _) = FontLibrary::new(Default::default());
+        let mut text = crate::text::Text::new(&library);
+        let primary = text.font_family_id("Segoe UI").expect("Windows UI font");
+        let draw = |id| {
+            render(
+                &library,
+                "Пример Sample",
+                id,
+                16.0,
+                (320, 32),
+                [0.1; 4],
+                [1.0; 4],
+            )
+            .unwrap()
+        };
+        let first = draw(Some(primary));
+        for _ in 0..3 {
+            let cached = text.font_family_id("Segoe UI");
+            assert_eq!(cached, Some(primary));
+            assert_eq!(draw(cached).rgba, first.rgba);
+        }
+    }
     #[test]
     fn invisible_title_tail_does_not_rasterize_more_glyphs() {
         let (library, _) = FontLibrary::new(Default::default());

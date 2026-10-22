@@ -31,8 +31,10 @@ pub struct DragState {
     manager: Option<WlDataDeviceManager>,
     devices: HashMap<sctk::reexports::client::backend::ObjectId, WlDataDevice>,
     active: Option<Active>,
-    offers:
-        HashMap<sctk::reexports::client::backend::ObjectId, (WlDataOffer, Vec<String>)>,
+    offers: HashMap<
+        sctk::reexports::client::backend::ObjectId,
+        (WlDataDevice, WlDataOffer, Vec<String>),
+    >,
     queue: QueueHandle<WinitState>,
 }
 struct Active {
@@ -42,10 +44,56 @@ struct Active {
     _buffer: Buffer,
     _pool: SlotPool,
     mime: String,
-    target: Option<(WindowId, PhysicalPosition<f64>)>,
-    offer: Option<WlDataOffer>,
+    destination:
+        Destination<WlDataDevice, WlDataOffer, (WindowId, PhysicalPosition<f64>)>,
+}
+
+/// Destination events have no source ID: correlate them with the initiating
+/// seat's data device and a locally accepted offer before completing a transfer.
+struct Destination<D, O, T> {
+    device: D,
+    accepted: Option<(O, T)>,
     delivered: bool,
-    dropped: bool,
+}
+
+impl<D: PartialEq, O, T> Destination<D, O, T> {
+    fn new(device: D) -> Self {
+        Self {
+            device,
+            accepted: None,
+            delivered: false,
+        }
+    }
+
+    fn enter(&mut self, device: &D, accepted: Option<(O, T)>) -> bool {
+        if self.device != *device || self.delivered {
+            return false;
+        }
+        self.accepted = accepted;
+        self.accepted.is_some()
+    }
+
+    fn target_mut(&mut self, device: &D) -> Option<&mut T> {
+        if self.device != *device || self.delivered {
+            return None;
+        }
+        self.accepted.as_mut().map(|(_, target)| target)
+    }
+
+    fn leave(&mut self, device: &D) {
+        if self.device == *device {
+            self.accepted = None;
+        }
+    }
+
+    fn complete_drop(&mut self, device: &D) -> Option<(O, T)> {
+        if self.device != *device || self.delivered {
+            return None;
+        }
+        let accepted = self.accepted.take()?;
+        self.delivered = true;
+        Some(accepted)
+    }
 }
 impl Drop for Active {
     fn drop(&mut self) {
@@ -92,7 +140,7 @@ impl WinitState {
             // The application already cancelled its gesture. Do not enqueue a
             // second completion which could cancel a subsequent drag.
             self.tab_drag.active = None;
-            for (_, (offer, _)) in self.tab_drag.offers.drain() {
+            for (_, (_, offer, _)) in self.tab_drag.offers.drain() {
                 offer.destroy();
             }
         }
@@ -213,28 +261,23 @@ impl WinitState {
             _buffer: buffer,
             _pool: pool,
             mime,
-            target: None,
-            offer: None,
-            delivered: false,
-            dropped: false,
+            destination: Destination::new(device.clone()),
         });
         Ok(())
     }
-    fn finish_native_tab_drag(&mut self, cancelled: bool) {
+    fn finish_native_tab_drag(&mut self) {
         if let Some(active) = self.tab_drag.active.take() {
-            if !active.delivered {
+            if !active.destination.delivered {
                 self.events_sink.push_window_event(
                     WindowEvent::TabDragFinished {
-                        destination: active
-                            .target
-                            .map(|(id, p)| (crate::window::WindowId(id), p)),
-                        cancelled,
+                        destination: None,
+                        cancelled: true,
                     },
                     active.source_id,
                 );
             }
         }
-        for (_, (offer, _)) in self.tab_drag.offers.drain() {
+        for (_, (_, offer, _)) in self.tab_drag.offers.drain() {
             offer.destroy();
         }
     }
@@ -254,7 +297,7 @@ impl Dispatch<WlDataDevice, ()> for WinitState {
     sctk::reexports::client::event_created_child!(WinitState, WlDataDevice, [0 => (WlDataOffer, ())]);
     fn event(
         state: &mut Self,
-        _: &WlDataDevice,
+        device: &WlDataDevice,
         event: wl_data_device::Event,
         _: &(),
         _: &Connection,
@@ -262,7 +305,10 @@ impl Dispatch<WlDataDevice, ()> for WinitState {
     ) {
         match event {
             wl_data_device::Event::DataOffer { id } => {
-                state.tab_drag.offers.insert(id.id(), (id, Vec::new()));
+                state
+                    .tab_drag
+                    .offers
+                    .insert(id.id(), (device.clone(), id, Vec::new()));
             }
             wl_data_device::Event::Enter {
                 serial,
@@ -278,31 +324,36 @@ impl Dispatch<WlDataDevice, ()> for WinitState {
                     }
                     return;
                 };
+                // A rejected/new enter must not retain an older accepted target.
+                active.destination.leave(device);
                 let Some(offer) = id else {
                     return;
                 };
-                let valid = state
-                    .tab_drag
-                    .offers
-                    .get(&offer.id())
-                    .is_some_and(|(_, types)| types.contains(&active.mime));
+                let valid = state.tab_drag.offers.get(&offer.id()).is_some_and(
+                    |(owner, _, types)| owner == device && types.contains(&active.mime),
+                );
                 let windows = state.windows.borrow();
                 if valid {
                     if let Some(window) = windows.get(&wid) {
                         let scale = window.lock().unwrap().scale_factor();
-                        active.target =
-                            Some((wid, LogicalPosition::new(x, y).to_physical(scale)));
-                        offer.accept(serial, Some(active.mime.clone()));
-                        offer.set_actions(DndAction::Move, DndAction::Move);
-                        active.offer = Some(offer);
-                        return;
+                        if active.destination.enter(
+                            device,
+                            Some((
+                                offer.clone(),
+                                (wid, LogicalPosition::new(x, y).to_physical(scale)),
+                            )),
+                        ) {
+                            offer.accept(serial, Some(active.mime.clone()));
+                            offer.set_actions(DndAction::Move, DndAction::Move);
+                            return;
+                        }
                     }
                 }
                 offer.accept(serial, None);
             }
             wl_data_device::Event::Motion { x, y, .. } => {
                 if let Some(active) = &mut state.tab_drag.active {
-                    if let Some((id, point)) = &mut active.target {
+                    if let Some((id, point)) = active.destination.target_mut(device) {
                         if let Some(window) = state.windows.borrow().get(id) {
                             *point = LogicalPosition::new(x, y)
                                 .to_physical(window.lock().unwrap().scale_factor());
@@ -312,28 +363,38 @@ impl Dispatch<WlDataDevice, ()> for WinitState {
             }
             wl_data_device::Event::Leave => {
                 if let Some(active) = &mut state.tab_drag.active {
-                    active.target = None;
-                    active.offer = None;
+                    active.destination.leave(device);
                 }
-                for (_, (offer, _)) in state.tab_drag.offers.drain() {
-                    offer.destroy();
-                }
+                state.tab_drag.offers.retain(|_, (owner, offer, _)| {
+                    if owner == device {
+                        offer.destroy();
+                        false
+                    } else {
+                        true
+                    }
+                });
             }
             wl_data_device::Event::Drop => {
                 if let Some(active) = &mut state.tab_drag.active {
-                    if let Some(offer) = &active.offer {
-                        offer.finish();
-                    }
+                    let Some((offer, (id, point))) =
+                        active.destination.complete_drop(device)
+                    else {
+                        return;
+                    };
+                    let windows = state.windows.borrow();
+                    let valid = windows.contains_key(&active.source_id)
+                        && windows.contains_key(&id);
+                    // Only accepted local offers may produce a successful drop.
+                    // A vanished window cancels rather than falling back to detach.
+                    offer.finish();
                     state.events_sink.push_window_event(
                         WindowEvent::TabDragFinished {
-                            destination: active
-                                .target
-                                .map(|(id, p)| (crate::window::WindowId(id), p)),
-                            cancelled: false,
+                            destination: valid
+                                .then_some((crate::window::WindowId(id), point)),
+                            cancelled: !valid,
                         },
                         active.source_id,
                     );
-                    active.delivered = true;
                 }
             }
             wl_data_device::Event::Selection { id: Some(offer) } => {
@@ -344,6 +405,7 @@ impl Dispatch<WlDataDevice, ()> for WinitState {
         }
     }
 }
+
 impl Dispatch<WlDataOffer, ()> for WinitState {
     fn event(
         state: &mut Self,
@@ -354,13 +416,9 @@ impl Dispatch<WlDataOffer, ()> for WinitState {
         _: &QueueHandle<Self>,
     ) {
         if let wl_data_offer::Event::Offer { mime_type } = event {
-            state
-                .tab_drag
-                .offers
-                .entry(offer.id())
-                .or_insert_with(|| (offer.clone(), Vec::new()))
-                .1
-                .push(mime_type);
+            if let Some((_, _, types)) = state.tab_drag.offers.get_mut(&offer.id()) {
+                types.push(mime_type);
+            }
         }
     }
 }
@@ -382,22 +440,60 @@ impl Dispatch<WlDataSource, ()> for WinitState {
             return;
         }
         match event {
-            wl_data_source::Event::DndDropPerformed => {
-                if let Some(active) = &mut state.tab_drag.active {
-                    active.dropped = true;
-                }
-            }
-            wl_data_source::Event::DndFinished => state.finish_native_tab_drag(false),
-            wl_data_source::Event::Cancelled => {
+            wl_data_source::Event::DndFinished | wl_data_source::Event::Cancelled => {
                 // The protocol conflates Escape and an unaccepted desktop drop.
                 // Never detach on an ambiguous cancellation (and risk moving a
                 // session after Escape). Dropping on a terminal body detaches.
-                let cancelled =
-                    !state.tab_drag.active.as_ref().is_some_and(|a| a.dropped);
-                state.finish_native_tab_drag(cancelled);
+                // Source completion alone does not authenticate a local target.
+                // Success was already delivered by the accepted destination Drop.
+                state.finish_native_tab_drag();
             }
             wl_data_source::Event::Send { fd, .. } => drop(fd), // no terminal data leaves this process
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Destination;
+
+    #[test]
+    fn unrelated_seat_cannot_change_or_complete_destination() {
+        let mut destination = Destination::new(1);
+        assert!(destination.enter(&1, Some(("offer", (10, 20)))));
+        assert!(!destination.enter(&2, Some(("other offer", (30, 40)))));
+        assert!(destination.target_mut(&2).is_none());
+        destination.leave(&2);
+        assert!(destination.complete_drop(&2).is_none());
+        assert!(!destination.delivered);
+        assert_eq!(destination.complete_drop(&1), Some(("offer", (10, 20))));
+    }
+
+    #[test]
+    fn rejected_offer_and_leave_cannot_reuse_previous_target() {
+        let mut destination = Destination::new(1);
+        assert!(destination.complete_drop(&1).is_none());
+        destination.enter(&1, Some(("offer", 10)));
+        assert!(!destination.enter(&1, None));
+        assert!(destination.complete_drop(&1).is_none());
+        destination.enter(&1, Some(("next offer", 20)));
+        destination.leave(&1);
+        assert!(destination.complete_drop(&1).is_none());
+        assert!(!destination.delivered);
+    }
+
+    #[test]
+    fn accepted_drop_uses_latest_position_and_delivers_only_once() {
+        let mut destination = Destination::new(1);
+        destination.enter(&1, Some(("offer", (10, 20))));
+        *destination.target_mut(&1).unwrap() = (30, 40);
+        assert_eq!(destination.complete_drop(&1), Some(("offer", (30, 40))));
+        assert!(destination.delivered);
+        assert!(destination.complete_drop(&1).is_none());
+        destination.leave(&1);
+        assert!(!destination.enter(&1, Some(("late offer", (50, 60)))));
+        assert!(destination.target_mut(&1).is_none());
+        assert!(destination.complete_drop(&1).is_none());
     }
 }

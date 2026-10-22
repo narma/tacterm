@@ -51,6 +51,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/ci-deduplicate
         id: check
+        with:
+          validation-jobs: '["test-native (windows-latest)", "test-native (macos-latest)", "test-native (ubuntu-latest)", "msys2-build-test (UCRT64)"]'
 
   test-native:
     needs: changes
