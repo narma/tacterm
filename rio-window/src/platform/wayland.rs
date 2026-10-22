@@ -60,9 +60,35 @@ impl<T> EventLoopBuilderExtWayland for EventLoopBuilder<T> {
 }
 
 /// Additional methods on [`Window`] that are specific to Wayland.
-pub trait WindowExtWayland {}
+pub trait WindowExtWayland {
+    fn cancel_tab_drag(&self);
+    fn start_tab_drag(
+        &self,
+        image: crate::window::TabDragImage,
+    ) -> Result<(), crate::error::ExternalError>;
+}
 
-impl WindowExtWayland for Window {}
+impl WindowExtWayland for Window {
+    fn cancel_tab_drag(&self) {
+        match &self.window {
+            crate::platform_impl::Window::Wayland(window) => window.cancel_tab_drag(),
+            #[cfg(x11_platform)]
+            _ => {}
+        }
+    }
+    fn start_tab_drag(
+        &self,
+        image: crate::window::TabDragImage,
+    ) -> Result<(), crate::error::ExternalError> {
+        match &self.window {
+            crate::platform_impl::Window::Wayland(window) => window.start_tab_drag(image),
+            #[cfg(x11_platform)]
+            _ => Err(crate::error::ExternalError::NotSupported(
+                crate::error::NotSupportedError::new(),
+            )),
+        }
+    }
+}
 
 /// Additional methods on [`WindowAttributes`] that are specific to Wayland.
 pub trait WindowAttributesExtWayland {

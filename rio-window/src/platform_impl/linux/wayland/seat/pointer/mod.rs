@@ -177,12 +177,16 @@ impl PointerHandler for WinitState {
                 ref kind @ PointerEventKind::Press { button, serial, .. }
                 | ref kind @ PointerEventKind::Release { button, serial, .. } => {
                     // Update the last button serial.
-                    pointer
-                        .winit_data()
-                        .inner
-                        .lock()
-                        .unwrap()
-                        .latest_button_serial = serial;
+                    {
+                        let mut data = pointer.winit_data().inner.lock().unwrap();
+                        data.latest_button_serial = serial;
+                        if button == 0x110 {
+                            // BTN_LEFT: only a live press can start DnD.
+                            data.tab_drag_serial =
+                                matches!(kind, PointerEventKind::Press { .. })
+                                    .then_some(serial);
+                        }
+                    }
 
                     let button = wayland_button_to_winit(button);
                     let state = if matches!(kind, PointerEventKind::Press { .. }) {
@@ -345,6 +349,10 @@ impl WinitPointerData {
         self.sctk_data.latest_button_serial().unwrap_or_default()
     }
 
+    pub fn tab_drag_serial(&self) -> Option<u32> {
+        self.inner.lock().unwrap().tab_drag_serial
+    }
+
     /// Last enter serial.
     pub fn latest_enter_serial(&self) -> u32 {
         self.sctk_data.latest_enter_serial().unwrap_or_default()
@@ -366,6 +374,7 @@ impl PointerDataExt for WinitPointerData {
 
 #[derive(Debug)]
 pub struct WinitPointerDataInner {
+    tab_drag_serial: Option<u32>,
     /// The associated locked pointer.
     locked_pointer: Option<ZwpLockedPointerV1>,
 
@@ -397,6 +406,7 @@ impl Drop for WinitPointerDataInner {
 impl Default for WinitPointerDataInner {
     fn default() -> Self {
         Self {
+            tab_drag_serial: None,
             surface: None,
             locked_pointer: None,
             confined_pointer: None,

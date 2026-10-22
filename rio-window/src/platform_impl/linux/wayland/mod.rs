@@ -18,6 +18,7 @@ mod event_loop;
 mod output;
 mod seat;
 mod state;
+mod tab_drag;
 mod types;
 mod window;
 

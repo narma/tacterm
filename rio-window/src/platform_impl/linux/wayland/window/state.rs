@@ -230,7 +230,9 @@ impl WindowState {
     }
 
     /// Apply closure on the given pointer.
-    fn apply_on_pointer<F: Fn(&ThemedPointer<WinitPointerData>, &WinitPointerData)>(
+    pub(crate) fn apply_on_pointer<
+        F: Fn(&ThemedPointer<WinitPointerData>, &WinitPointerData),
+    >(
         &self,
         callback: F,
     ) {

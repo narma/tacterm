@@ -17,6 +17,7 @@ release availability and known limitations.
 | Independent configuration | Settings live in a separate `tacterm` directory, with an optional `TACTERM_CONFIG_HOME` override. On first launch, existing Rio settings and assets are imported if no tacterm configuration exists. Your original Rio configuration is preserved. See [configuration details](README.md#current-status). |
 | WSL working directories | With directory inheritance enabled, new tabs open in the focused tab's working directory. WSL zsh integration reports that location automatically. |
 | New tab dimensions | Opening more tabs preserves terminal area and font size instead of progressively shrinking the usable space. |
+| Tab transfer | Drag a visible tab out of its strip to detach the session and split panels, or drop onto another window's tab strip to transfer them together. New windows inherit the parent's current window state. Windows, macOS and X11 use a title preview and preserve the gesture while switching windows; Wayland uses compositor-managed drag-and-drop. On Wayland, drop on terminal content to detach; ambiguous desktop drops cancel safely, like Escape. |
 | GPU memory use | Lower initial GPU memory use, including windows with multiple panels. Storage for text and color glyphs grows as needed. |
 | Windows VRR presentation | Focused, visible maximized and fullscreen windows keep presenting even when text is idle, for steadier presentation on variable-refresh displays. Refresh timing also handles fractional display rates more accurately. |
 

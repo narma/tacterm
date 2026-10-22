@@ -470,6 +470,9 @@ impl<T: 'static> EventLoop<T> {
 
         // Handle non-synthetic events.
         self.with_state(|state| {
+            // Failed drag requests emit a completion too. Drain it in this
+            // iteration instead of leaving it asleep until unrelated input.
+            state.start_pending_tab_drags();
             buffer_sink.append(&mut state.events_sink);
         });
         for event in buffer_sink.drain() {

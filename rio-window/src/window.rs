@@ -1,6 +1,52 @@
 //! The [`Window`] struct and associated types.
 use std::fmt;
 
+/// Bounded RGBA preview for an in-process tab drag. No shell data is exported.
+#[derive(Debug, Clone)]
+pub struct TabDragImage {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub scale: i32,
+    pub grab_x: i32,
+}
+
+impl TabDragImage {
+    pub fn is_valid(&self) -> bool {
+        (24..=4096).contains(&self.width)
+            && (20..=256).contains(&self.height)
+            && (1..=8).contains(&self.scale)
+            && self.width.is_multiple_of(self.scale as u32)
+            && self.height.is_multiple_of(self.scale as u32)
+            && self.rgba.len() == self.width as usize * self.height as usize * 4
+    }
+}
+
+#[cfg(test)]
+mod tab_drag_image_tests {
+    use super::TabDragImage;
+    #[test]
+    fn rejects_invalid_native_buffer_layouts() {
+        let mut image = TabDragImage {
+            rgba: vec![255; 240 * 24 * 4],
+            width: 240,
+            height: 24,
+            scale: 2,
+            grab_x: 12,
+        };
+        assert!(image.is_valid());
+        image.scale = 0;
+        assert!(!image.is_valid());
+        image.scale = 7;
+        assert!(!image.is_valid());
+        image.scale = 2;
+        image.rgba.pop();
+        assert!(!image.is_valid());
+        image.width = u32::MAX;
+        assert!(!image.is_valid());
+    }
+}
+
 /// Background blur / liquid-glass style for a window.
 ///
 /// `Off` and `System` are the legacy bool states (`false` / `true`)

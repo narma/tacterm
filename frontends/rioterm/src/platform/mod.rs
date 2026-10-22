@@ -1,5 +1,14 @@
+#[cfg(any(all(target_os = "linux", feature = "x11"), test))]
+mod tab_drag_poll;
+
 #[cfg(target_os = "macos")]
 pub mod macos;
+
+#[cfg(windows)]
+pub mod windows;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod tab_drag;
 
 /// Escape shell-sensitive characters in a string by prefixing each
 /// with a backslash. Suitable for inserting paths into a live

@@ -41,6 +41,7 @@ use crate::window::Theme;
 
 /// Winit's Wayland state.
 pub struct WinitState {
+    pub tab_drag: super::tab_drag::DragState,
     /// The WlRegistry.
     pub registry_state: RegistryState,
 
@@ -207,6 +208,7 @@ impl WinitState {
         let custom_cursor_pool = Arc::new(Mutex::new(SlotPool::new(2, &shm).unwrap()));
 
         Ok(Self {
+            tab_drag: super::tab_drag::DragState::new(globals, queue_handle, &seat_state),
             registry_state,
             compositor_state: Arc::new(compositor_state),
             subcompositor_state: subcompositor_state.map(Arc::new),

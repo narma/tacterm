@@ -405,11 +405,23 @@ pub struct EventPayload {
     /// Event payload.
     pub payload: RioEventType,
     pub window_id: WindowId,
+    // Resolve at consumption time: even already queued PTY events follow a moved tab.
+    window_target: Option<Arc<parking_lot::RwLock<WindowId>>>,
 }
 
 impl EventPayload {
     pub fn new(payload: RioEventType, window_id: WindowId) -> Self {
-        Self { payload, window_id }
+        Self {
+            payload,
+            window_id,
+            window_target: None,
+        }
+    }
+
+    pub fn resolved_window_id(&self) -> WindowId {
+        self.window_target
+            .as_ref()
+            .map_or(self.window_id, |id| *id.read())
     }
 }
 
@@ -424,8 +436,39 @@ pub trait OnResize {
     fn on_resize(&mut self, window_size: WindowSize);
 }
 
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn queued_events_follow_the_session_destination() {
+        let target = Arc::new(parking_lot::RwLock::new(WindowId::from(1)));
+        let mut queued = EventPayload::new(
+            RioEvent::Title(42, "title".into()).into(),
+            WindowId::from(1),
+        );
+        queued.window_target = Some(Arc::clone(&target));
+        let cloned = queued.clone();
+        let other = EventPayload::new(RioEvent::Render.into(), WindowId::from(1));
+        *target.write() = WindowId::from(2);
+        assert_eq!(queued.resolved_window_id(), WindowId::from(2));
+        assert_eq!(cloned.resolved_window_id(), WindowId::from(2));
+        assert_eq!(other.resolved_window_id(), WindowId::from(1));
+    }
+}
+
 /// Event Loop for notifying the renderer about terminal events.
 pub trait EventListener {
+    /// Create an independently movable event destination for one terminal session.
+    fn for_window(&self, _id: WindowId) -> Self
+    where
+        Self: Sized + Clone,
+    {
+        self.clone()
+    }
+
+    fn retarget_window(&self, _id: WindowId) {}
+
     fn send_event(&self, _event: RioEvent, _id: WindowId) {}
 
     fn send_event_with_high_priority(&self, _event: RioEvent, _id: WindowId) {}
@@ -450,23 +493,42 @@ impl EventListener for VoidListener {}
 #[cfg(feature = "rio-window")]
 pub struct EventProxy {
     proxy: EventLoopProxy<EventPayload>,
+    window_target: Option<Arc<parking_lot::RwLock<WindowId>>>,
 }
 
 #[cfg(feature = "rio-window")]
 impl EventProxy {
     pub fn new(proxy: EventLoopProxy<EventPayload>) -> Self {
-        Self { proxy }
+        Self {
+            proxy,
+            window_target: None,
+        }
     }
 
     pub fn send_event(&self, event: RioEventType, id: WindowId) {
-        let _ = self.proxy.send_event(EventPayload::new(event, id));
+        let mut payload = EventPayload::new(event, id);
+        payload.window_target = self.window_target.clone();
+        let _ = self.proxy.send_event(payload);
     }
 }
 
 #[cfg(feature = "rio-window")]
 impl EventListener for EventProxy {
+    fn for_window(&self, id: WindowId) -> Self {
+        Self {
+            proxy: self.proxy.clone(),
+            window_target: Some(Arc::new(parking_lot::RwLock::new(id))),
+        }
+    }
+
+    fn retarget_window(&self, id: WindowId) {
+        if let Some(target) = &self.window_target {
+            *target.write() = id;
+        }
+    }
+
     fn send_event(&self, event: RioEvent, id: WindowId) {
-        let _ = self.proxy.send_event(EventPayload::new(event.into(), id));
+        self.send_event(event.into(), id);
     }
 }
 

@@ -5,6 +5,7 @@ pub mod fonts;
 // Re-exported here so `sugarloaf::font::glyf_decode` /
 // `sugarloaf::font::glyph_registry` keep resolving.
 pub use rio_graphics::glyph::{glyf_decode, glyph_registry};
+pub mod drag_image;
 #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android")))]
 pub mod linux;
 #[cfg(not(target_arch = "wasm32"))]

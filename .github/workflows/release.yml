@@ -157,7 +157,7 @@ jobs:
           NODE
       - name: Upload memory measurements
         if: ${{ !cancelled() && inputs.cold_memory_trial }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-memory-${{ matrix.id }}
           path: target/ci-memory/
@@ -178,7 +178,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/macos-x64-transfer/executable.tar.gz" tacterm
       - name: Upload macOS x64 executable for native validation
         if: matrix.id == 'macos-x64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-binary-macos-x64
           path: ${{ runner.temp }}/macos-x64-transfer/
@@ -200,7 +200,7 @@ jobs:
         run: |
           ./packaging/windows/test-installer.ps1 -Version '${{ needs.prepare.outputs.version }}' -Arch '${{ matrix.arch }}'
           node packaging/release.mjs setup ${{ matrix.id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: matrix.id != 'macos-x64'
         with:
           name: tacterm-${{ matrix.id }}${{ runner.os == 'Windows' && '-portable' || '' }}
@@ -212,7 +212,7 @@ jobs:
           retention-days: 7
           # ZIP/tar.gz packages are already compressed.
           compression-level: 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: runner.os == 'Windows'
         with:
           name: tacterm-${{ matrix.id }}-setup
@@ -224,7 +224,7 @@ jobs:
           compression-level: 0
       - name: Upload build timings
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-timings-${{ matrix.id }}
           path: target/cargo-timings/
@@ -259,7 +259,7 @@ jobs:
           test "$(lipo -archs tacterm)" = x86_64
       - name: Package and smoke-test native executable
         run: node packaging/release.mjs pack macos-x64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: tacterm-macos-x64
           path: |

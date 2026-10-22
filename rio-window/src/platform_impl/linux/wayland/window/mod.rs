@@ -193,6 +193,8 @@ impl Window {
             .insert(window_id, window_state.clone());
 
         let window_requests = WindowRequests {
+            cancel_tab_drag: AtomicBool::new(false),
+            tab_drag: Mutex::new(None),
             redraw_requested: AtomicBool::new(true),
             closed: AtomicBool::new(false),
         };
@@ -609,6 +611,26 @@ impl Window {
         self.window_state.lock().unwrap().drag_window()
     }
 
+    pub fn start_tab_drag(
+        &self,
+        image: crate::window::TabDragImage,
+    ) -> Result<(), ExternalError> {
+        if !image.is_valid() {
+            return Err(ExternalError::NotSupported(NotSupportedError::new()));
+        }
+        *self.window_requests.tab_drag.lock().unwrap() = Some(image);
+        self.event_loop_awakener.ping();
+        Ok(())
+    }
+
+    pub fn cancel_tab_drag(&self) {
+        *self.window_requests.tab_drag.lock().unwrap() = None;
+        self.window_requests
+            .cancel_tab_drag
+            .store(true, Ordering::Relaxed);
+        self.event_loop_awakener.ping();
+    }
+
     #[inline]
     pub fn set_cursor_hittest(&self, hittest: bool) -> Result<(), ExternalError> {
         let surface = self.window.wl_surface();
@@ -733,6 +755,8 @@ impl Drop for Window {
 /// The request from the window to the event loop.
 #[derive(Debug)]
 pub struct WindowRequests {
+    pub cancel_tab_drag: AtomicBool,
+    pub tab_drag: Mutex<Option<crate::window::TabDragImage>>,
     /// The window was closed.
     pub closed: AtomicBool,
 

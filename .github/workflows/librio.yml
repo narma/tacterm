@@ -1,4 +1,6 @@
 name: librio
+# Include the merge SHA: a changed base branch must be validated again.
+run-name: '${{ github.workflow }} / ${{ github.event_name }} / ${{ github.event.pull_request.number || github.ref_name }} / ${{ github.sha }}'
 
 on:
   push:
@@ -8,23 +10,48 @@ on:
       - 'rio-vt/**'
       - 'teletypewriter/**'
       - '.github/workflows/librio.yml'
+      - '.github/actions/ci-deduplicate/**'
+      - '.github/scripts/ci-deduplicate*'
   pull_request:
     paths:
       - 'librio/**'
       - 'rio-vt/**'
       - 'teletypewriter/**'
       - '.github/workflows/librio.yml'
+      - '.github/actions/ci-deduplicate/**'
+      - '.github/scripts/ci-deduplicate*'
 
+# Serialize duplicate deliveries so the second can reuse the first's result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
+  # Use the same minimum OS for Rust, C++ dependencies and the C smoke test.
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
 
 jobs:
+  changes:
+    name: Check for duplicate CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/ci-deduplicate
+        id: check
+        with:
+          validation-jobs: '["librio"]'
+
   librio:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
@@ -33,7 +60,7 @@ jobs:
       - run: cargo test -p librio
       - run: make librio-ctest
       - run: make librio-xcframework
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: RioKit.xcframework
           path: target/librio/RioKit.xcframework

@@ -4059,6 +4059,8 @@ dependencies = [
  "lru",
  "notify",
  "objc-rs 0.3.2",
+ "objc2 0.5.2",
+ "objc2-foundation 0.2.2",
  "onig",
  "onig_sys",
  "parking_lot",
@@ -4084,6 +4086,7 @@ dependencies = [
  "wgpu",
  "windows-sys 0.60.2",
  "winres",
+ "x11rb",
 ]
 
 [[package]]

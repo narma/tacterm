@@ -573,6 +573,7 @@ pub fn create_pty_with_spawn(
 
     // No program means the caller wants the user's default shell, which is the
     // only case that goes through `login`. A named program is spawned as given.
+    #[cfg(target_os = "macos")]
     let uses_default_shell = shell.is_none();
     let shell_program = shell.unwrap_or(&user.shell);
 
@@ -1119,7 +1120,7 @@ mod login_argv_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "macos", target_os = "freebsd")))]
 mod termp_tests {
     use super::*;
 

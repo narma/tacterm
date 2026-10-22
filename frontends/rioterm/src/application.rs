@@ -30,6 +30,8 @@ use rio_window::window::{CursorIcon, Fullscreen};
 use std::error::Error;
 use std::time::{Duration, Instant};
 
+mod tab_drag;
+
 pub struct Application<'a> {
     config: rio_backend::config::Config,
     /// The title template shows `{{columns}}`/`{{lines}}`, so a resize
@@ -41,6 +43,7 @@ pub struct Application<'a> {
     scheduler: Scheduler,
     app_id: Option<String>,
     global_hotkey: Option<crate::global_hotkey::GlobalHotkeys>,
+    tab_drag: tab_drag::TabDragState,
     /// Frontmost app when the quake window was shown, re-activated
     /// when it hides so focus returns where the user was.
     #[cfg(target_os = "macos")]
@@ -86,6 +89,7 @@ impl Application<'_> {
             scheduler,
             app_id,
             global_hotkey: None,
+            tab_drag: Default::default(),
             #[cfg(target_os = "macos")]
             quake_previous_app: None,
         }
@@ -376,7 +380,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: EventPayload) {
-        let window_id = event.window_id;
+        let window_id = event.resolved_window_id();
         match event.payload {
             RioEventType::Rio(RioEvent::Render) => {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
@@ -1220,9 +1224,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         // core's `WindowId`. Convert once at this boundary.
         let window_id: rio_backend::event::WindowId = window_id.into();
 
-        let route = match self.router.routes.get_mut(&window_id) {
-            Some(window) => window,
-            None => return,
+        if self.handle_tab_drag_event(event_loop, window_id, &event) {
+            return;
+        }
+        let Some(route) = self.router.routes.get_mut(&window_id) else {
+            return;
         };
 
         match event {
@@ -1778,8 +1784,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         .as_ref()
                         .is_some_and(|i| i.is_dragging())
                 {
-                    let scale = route.window.screen.sugarloaf.scale_factor();
-                    route.window.screen.handle_tab_drag_move(x as f32 / scale);
+                    self.tab_drag.move_in_strip(route, position);
                     route.window.winit_window.set_cursor(CursorIcon::Default);
                     route.request_redraw();
                     return;
@@ -2346,6 +2351,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_tab_drag(event_loop);
         // A confirmed quit can be set from any input path (keys today,
         // a future mouse or menu handler tomorrow); honoring it here,
         // once per event batch, keeps the exit independent of which
@@ -2363,6 +2369,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             Some(instant) => ControlFlow::WaitUntil(instant),
             None => ControlFlow::Wait,
         };
+        let control_flow = self.tab_drag_control_flow(control_flow);
         event_loop.set_control_flow(control_flow);
     }
 
@@ -2415,6 +2422,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
     // This is irreversible - if this event is emitted, it is guaranteed to be the last event that gets emitted.
     // You generally want to treat this as an “do on quit” event.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.tab_drag = Default::default();
         // Ensure that all the windows are dropped, so the destructors for
         // Renderer and contexts ran.
         self.router.routes.clear();
